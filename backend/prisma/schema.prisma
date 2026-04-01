@@ -1,0 +1,48 @@
+// backend/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite" // production change to postgresql
+
+}
+
+model Product {
+  product_code String   @id
+  name         String
+  description  String?
+  weight       Float?
+  price        Float
+  quantity     Int      @default(0)
+  last_updated DateTime @updatedAt
+}
+
+model Order {
+  order_id             String   @id @default(uuid())
+  type                 String   // "SALE" or "PURCHASE"
+  customer_supplier_id String?  
+  products             String   // Storing JSON string of products due to SQLite lacking JSON
+  status               String   @default("QUOTATION") // QUOTATION, PACKING, DISPATCH, COMPLETED
+  date                 DateTime @default(now())
+  notes                String?
+}
+
+model Manufacturing {
+  batch_number  String   @id
+  raw_materials String   // JSON string
+  output        String   // JSON string
+  status        String   @default("WIP")
+  start_date    DateTime @default(now())
+  end_date      DateTime?
+}
+
+model User {
+  id            String   @id @default(uuid())
+  username      String   @unique
+  password_hash String
+  role          String   @default("SYSTEM_ADMIN") // SYSTEM_ADMIN, INVENTORY_MANAGER, SALES_EXECUTIVE, PROCUREMENT_OFFICER, PRODUCTION_TECHNICIAN, LOGISTICS_COORDINATOR
+  created_at    DateTime @default(now())
+}
+

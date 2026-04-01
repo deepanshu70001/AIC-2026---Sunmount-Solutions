@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply font-body bg-surface text-on-surface;
+    font-family: 'Inter', sans-serif;
+  }
+}
+
+@layer utilities {
+  .material-symbols-outlined {
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  }
+  .material-3d-shadow {
+    box-shadow: 0 12px 32px -4px rgba(25, 28, 29, 0.06);
+  }
+  .custom-glass {
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(12px);
+  }
+  .primary-gradient {
+    background: linear-gradient(135deg, #172434 0%, #2d3a4a 100%);
+  }
+}
