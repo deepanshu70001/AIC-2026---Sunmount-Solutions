@@ -1,0 +1,1129 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = __importDefault(require("express"));
+const cors_1 = __importDefault(require("cors"));
+const prisma_1 = __importDefault(require("./prisma"));
+const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const bcryptjs_1 = __importDefault(require("bcryptjs"));
+require("dotenv/config");
+const crypto_1 = require("crypto");
+const compliance_1 = require("./compliance");
+const crdt_1 = require("./crdt");
+const app = (0, express_1.default)();
+const PORT = process.env.PORT || 3001;
+const SECRET_KEY = process.env.JWT_SECRET || 'super_secret_inventory_key';
+const MIN_STOCK_THRESHOLD = 15;
+const CRITICAL_STOCK_THRESHOLD = 5;
+const SALES_STATUSES = new Set(['QUOTATION', 'PACKING', 'DISPATCH']);
+const PURCHASE_STATUSES = new Set(['QUOTATION', 'PAID', 'UNPAID', 'COMPLETED']);
+const CRDT_CLOUD_NODE_ID = (0, crdt_1.normalizeNodeId)(process.env.CRDT_CLOUD_NODE_ID || process.env.CRDT_NODE_ID || 'CLOUD-HQ');
+const PARTY_DIRECTORY = [
+    {
+        id: 'CUST-1001',
+        type: 'CUSTOMER',
+        name: 'Tata Projects Ltd',
+        contactPerson: 'Nikhil Sharma',
+        phone: '+91-98765-12001',
+        paymentTerms: 'Net 30',
+        reliabilityScore: 91
+    },
+    {
+        id: 'CUST-1002',
+        type: 'CUSTOMER',
+        name: 'L&T Engineering',
+        contactPerson: 'Pooja Verma',
+        phone: '+91-98765-12002',
+        paymentTerms: 'Net 21',
+        reliabilityScore: 87
+    },
+    {
+        id: 'CUST-1003',
+        type: 'CUSTOMER',
+        name: 'Mahindra Industrial Works',
+        contactPerson: 'Karan Mehta',
+        phone: '+91-98765-12003',
+        paymentTerms: 'Net 45',
+        reliabilityScore: 74
+    },
+    {
+        id: 'SUP-2001',
+        type: 'SUPPLIER',
+        name: 'Jindal Steel & Power',
+        contactPerson: 'Priyanka Joshi',
+        phone: '+91-99876-22001',
+        paymentTerms: 'Advance 20%, Balance on Delivery',
+        reliabilityScore: 82
+    },
+    {
+        id: 'SUP-2002',
+        type: 'SUPPLIER',
+        name: 'Havells India',
+        contactPerson: 'Rahul Menon',
+        phone: '+91-99876-22002',
+        paymentTerms: 'Net 30',
+        reliabilityScore: 88
+    },
+    {
+        id: 'SUP-2003',
+        type: 'SUPPLIER',
+        name: 'Bharat Raw Materials Co.',
+        contactPerson: 'Aditi Singh',
+        phone: '+91-99876-22003',
+        paymentTerms: 'Net 15',
+        reliabilityScore: 63
+    }
+];
+const parseStoredJsonArray = (value) => {
+    try {
+        const parsed = JSON.parse(value || '[]');
+        return Array.isArray(parsed) ? parsed : [];
+    }
+    catch {
+        return [];
+    }
+};
+const parseStoredJsonObject = (value) => {
+    try {
+        if (!value)
+            return null;
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+    }
+    catch {
+        return null;
+    }
+};
+const mapOrderForResponse = (order) => ({
+    ...order,
+    products: parseStoredJsonArray(order.products),
+    transport_details: parseStoredJsonObject(order.transport_details),
+    compliance_meta: parseStoredJsonObject(order.compliance_meta)
+});
+const normalizeOrderType = (value) => {
+    const type = String(value || '').trim().toUpperCase();
+    if (type !== 'SALE' && type !== 'PURCHASE') {
+        throw new Error('Order type must be SALE or PURCHASE');
+    }
+    return type;
+};
+const normalizeOrderStatus = (type, value) => {
+    const status = String(value || '').trim().toUpperCase();
+    if (type === 'SALE' && SALES_STATUSES.has(status)) {
+        return status;
+    }
+    if (type === 'PURCHASE' && PURCHASE_STATUSES.has(status)) {
+        return status;
+    }
+    throw new Error(`Invalid status for ${type} order`);
+};
+const parseOrderLines = (value) => {
+    if (!Array.isArray(value) || value.length === 0)
+        throw new Error('At least one product line is required');
+    return value.map((raw, index) => {
+        const product_code = String(raw.product_code || '').trim().toUpperCase();
+        const quantity = Number(raw.quantity);
+        const price = Number(raw.price);
+        const hsn_code = raw.hsn_code ? String(raw.hsn_code).trim() : undefined;
+        const gst_rate = raw.gst_rate !== undefined ? Number(raw.gst_rate) : undefined;
+        if (!product_code)
+            throw new Error(`Missing product code at row ${index + 1}`);
+        if (!Number.isInteger(quantity) || quantity <= 0)
+            throw new Error(`Invalid quantity at row ${index + 1}`);
+        if (!Number.isFinite(price) || price < 0)
+            throw new Error(`Invalid price at row ${index + 1}`);
+        if (gst_rate !== undefined && (!Number.isFinite(gst_rate) || gst_rate < 0 || gst_rate > 40)) {
+            throw new Error(`Invalid GST rate at row ${index + 1}`);
+        }
+        return { product_code, quantity, price, ...(hsn_code && { hsn_code }), ...(gst_rate !== undefined && { gst_rate }) };
+    });
+};
+const parseQuantityLines = (value, label) => {
+    if (!Array.isArray(value) || value.length === 0)
+        throw new Error(`${label} must contain at least one row`);
+    return value.map((raw, index) => {
+        const product_code = String(raw.product_code || '').trim().toUpperCase();
+        const quantity = Number(raw.quantity);
+        if (!product_code)
+            throw new Error(`Missing ${label} product code at row ${index + 1}`);
+        if (!Number.isInteger(quantity) || quantity <= 0)
+            throw new Error(`Invalid ${label} quantity at row ${index + 1}`);
+        return { product_code, quantity };
+    });
+};
+const parseCrdtSnapshotRows = (value) => {
+    if (!Array.isArray(value) || value.length === 0) {
+        throw new Error('CRDT snapshot payload must contain at least one row');
+    }
+    const seenCodes = new Set();
+    return value.map((raw, index) => {
+        const product_code = String(raw.product_code || raw.productCode || '').trim().toUpperCase();
+        const p = Number(raw.p);
+        const n = Number(raw.n);
+        if (!product_code)
+            throw new Error(`Missing product code in CRDT row ${index + 1}`);
+        if (!Number.isInteger(p) || p < 0)
+            throw new Error(`Invalid CRDT positive counter at row ${index + 1}`);
+        if (!Number.isInteger(n) || n < 0)
+            throw new Error(`Invalid CRDT negative counter at row ${index + 1}`);
+        if (seenCodes.has(product_code)) {
+            throw new Error(`Duplicate product code in CRDT row ${index + 1}: ${product_code}`);
+        }
+        seenCodes.add(product_code);
+        return { product_code, p, n };
+    });
+};
+const aggregateInventoryChanges = (changes) => {
+    const byProduct = new Map();
+    for (const change of changes) {
+        byProduct.set(change.product_code, (byProduct.get(change.product_code) || 0) + change.quantityDelta);
+    }
+    return Array.from(byProduct.entries())
+        .map(([product_code, quantityDelta]) => ({ product_code, quantityDelta }))
+        .filter(change => change.quantityDelta !== 0);
+};
+const invertInventoryChanges = (changes) => changes.map(change => ({ ...change, quantityDelta: -change.quantityDelta }));
+const getAppliedOrderInventoryChanges = (type, status, products) => {
+    if (type === 'SALE' && status === 'DISPATCH') {
+        return products.map(product => ({ product_code: product.product_code, quantityDelta: -product.quantity }));
+    }
+    if (type === 'PURCHASE' && status === 'COMPLETED') {
+        return products.map(product => ({ product_code: product.product_code, quantityDelta: product.quantity }));
+    }
+    return [];
+};
+const persistProductStockState = async (tx, product, nextState, nodeId) => {
+    const updateResult = await tx.product.updateMany({
+        where: {
+            product_code: String(product.product_code),
+            quantity: Number(product.quantity || 0),
+            crdt_p: String(product.crdt_p || '{}'),
+            crdt_n: String(product.crdt_n || '{}')
+        },
+        data: {
+            quantity: nextState.value,
+            crdt_p: (0, crdt_1.serializeCounter)(nextState.p),
+            crdt_n: (0, crdt_1.serializeCounter)(nextState.n),
+            crdt_last_node: nodeId,
+            crdt_last_merged_at: new Date()
+        }
+    });
+    if (updateResult.count !== 1) {
+        throw new Error(`Concurrent stock update detected for ${String(product.product_code)}`);
+    }
+};
+const applyInventoryChanges = async (tx, rawChanges, nodeIdInput = CRDT_CLOUD_NODE_ID) => {
+    const changes = aggregateInventoryChanges(rawChanges);
+    if (changes.length === 0)
+        return;
+    const nodeId = (0, crdt_1.normalizeNodeId)(nodeIdInput);
+    const productCodes = changes.map(change => change.product_code);
+    const products = await tx.product.findMany({
+        where: { product_code: { in: productCodes } },
+        select: {
+            product_code: true,
+            quantity: true,
+            crdt_p: true,
+            crdt_n: true
+        }
+    });
+    const productMap = new Map(products.map((product) => [String(product.product_code), product]));
+    for (const code of productCodes) {
+        if (!productMap.has(code))
+            throw new Error(`Unknown product code: ${code}`);
+    }
+    const nextStateByProduct = new Map();
+    for (const change of changes) {
+        const product = productMap.get(change.product_code);
+        const currentState = deriveProductStockState(product);
+        const nextState = (0, crdt_1.applyDeltaToStockState)(currentState, nodeId, change.quantityDelta);
+        if (nextState.value < 0) {
+            const available = Math.max(currentState.value, Number(product.quantity || 0));
+            throw new Error(`Insufficient stock for ${change.product_code}. Available: ${available}`);
+        }
+        nextStateByProduct.set(change.product_code, nextState);
+    }
+    for (const change of changes) {
+        const product = productMap.get(change.product_code);
+        const nextState = nextStateByProduct.get(change.product_code);
+        await persistProductStockState(tx, product, nextState, nodeId);
+    }
+};
+const getProductCatalogForOrder = async (tx, products) => {
+    const productCodes = Array.from(new Set(products.map(product => product.product_code)));
+    if (productCodes.length === 0)
+        return [];
+    return tx.product.findMany({
+        where: { product_code: { in: productCodes } },
+        select: { product_code: true, name: true, hsn_code: true, gst_rate: true }
+    });
+};
+const deriveProductStockState = (product) => {
+    const currentState = (0, crdt_1.materializeStockCounterState)(product.crdt_p, product.crdt_n);
+    const hasCounters = Object.keys(currentState.p).length > 0 || Object.keys(currentState.n).length > 0;
+    const quantity = Number(product.quantity || 0);
+    if (!hasCounters && quantity > 0) {
+        return {
+            p: { [CRDT_CLOUD_NODE_ID]: quantity },
+            n: {},
+            value: quantity,
+            bootstrapped: true
+        };
+    }
+    return { ...currentState, bootstrapped: false };
+};
+const DB_TX_MAX_RETRIES = Math.max(1, Number(process.env.DB_TX_MAX_RETRIES || 3));
+const DB_TX_RETRY_BASE_MS = Math.max(10, Number(process.env.DB_TX_RETRY_BASE_MS || 40));
+class ConcurrencyConflictError extends Error {
+    constructor(message = 'Concurrent transaction conflict. Please retry.') {
+        super(message);
+        this.name = 'ConcurrencyConflictError';
+    }
+}
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const isRetryableTransactionError = (error) => {
+    const code = String(error?.code || '').toUpperCase();
+    const message = String(error?.message || '').toLowerCase();
+    if (code === 'P2034')
+        return true; // Transaction conflict / deadlock style error.
+    const retryableSignals = [
+        'write conflict',
+        'transaction aborted',
+        'transienttransactionerror',
+        'unknowntransactioncommitresult',
+        'deadlock',
+        'concurrent',
+        'temporarily unavailable'
+    ];
+    return retryableSignals.some(signal => message.includes(signal));
+};
+const runAcidTransaction = async (work) => {
+    for (let attempt = 1; attempt <= DB_TX_MAX_RETRIES; attempt += 1) {
+        try {
+            return await prisma_1.default.$transaction(async (tx) => work(tx));
+        }
+        catch (error) {
+            const retryable = isRetryableTransactionError(error);
+            const isLastAttempt = attempt >= DB_TX_MAX_RETRIES;
+            if (!retryable || isLastAttempt) {
+                if (retryable) {
+                    throw new ConcurrencyConflictError();
+                }
+                throw error;
+            }
+            const backoffMs = DB_TX_RETRY_BASE_MS * attempt;
+            await sleep(backoffMs);
+        }
+    }
+    throw new ConcurrencyConflictError();
+};
+const getRequestErrorStatus = (error, fallbackStatus = 400) => {
+    if (error instanceof ConcurrencyConflictError)
+        return 409;
+    const message = String(error?.message || '');
+    if (/blocked/i.test(message))
+        return 409;
+    return fallbackStatus;
+};
+const daysSince = (date) => Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24));
+const riskLevelFromScore = (score) => (score >= 85 ? 'LOW' : score >= 70 ? 'MEDIUM' : 'HIGH');
+console.log('--- STARTING BACKEND SERVER ---');
+console.log(`Port: ${PORT}`);
+const corsOrigins = (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean);
+app.use((0, cors_1.default)(corsOrigins.length > 0
+    ? {
+        origin: (origin, callback) => {
+            if (!origin || corsOrigins.includes(origin)) {
+                callback(null, true);
+                return;
+            }
+            callback(new Error('Not allowed by CORS'));
+        }
+    }
+    : undefined));
+app.use(express_1.default.json());
+const chat_1 = __importDefault(require("./chat"));
+app.use('/api/chat', chat_1.default);
+app.get('/health', (_req, res) => {
+    res.json({ status: 'ok' });
+});
+// ------------------------------
+// Auth Middleware
+// ------------------------------
+const authenticate = (req, res, next) => {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token)
+        return res.status(401).json({ error: 'Unauthorized' });
+    jsonwebtoken_1.default.verify(token, SECRET_KEY, (err, user) => {
+        if (err)
+            return res.status(403).json({ error: 'Forbidden' });
+        req.user = user;
+        next();
+    });
+};
+// ------------------------------
+// Auth Endpoints
+// ------------------------------
+app.post('/api/login', async (req, res) => {
+    const { username, password } = req.body;
+    try {
+        const user = await prisma_1.default.user.findUnique({ where: { username } });
+        if (!user)
+            return res.status(401).json({ error: 'Invalid credentials' });
+        const isMatch = await bcryptjs_1.default.compare(password, user.password_hash);
+        if (!isMatch)
+            return res.status(401).json({ error: 'Invalid credentials' });
+        const token = jsonwebtoken_1.default.sign({ id: user.id, username: user.username, role: user.role }, SECRET_KEY, { expiresIn: '1d' });
+        res.json({ token, role: user.role, username: user.username });
+    }
+    catch (error) {
+        res.status(500).json({ error: 'Login failed' });
+    }
+});
+// ------------------------------
+// RBAC Middleware & User Management
+// ------------------------------
+const requireAdmin = (req, res, next) => {
+    if (req.user?.role !== 'SYSTEM_ADMIN') {
+        return res.status(403).json({ error: 'Restricted to SYSTEM_ADMIN' });
+    }
+    next();
+};
+const requireRoles = (roles) => {
+    return (req, res, next) => {
+        if (!req.user || !req.user.role)
+            return res.status(401).json({ error: 'Unauthorized' });
+        if (req.user.role === 'SYSTEM_ADMIN')
+            return next();
+        if (!roles.includes(req.user.role)) {
+            return res.status(403).json({ error: `Restricted to [${roles.join(', ')}]` });
+        }
+        next();
+    };
+};
+app.get('/api/users', authenticate, requireAdmin, async (req, res) => {
+    const users = await prisma_1.default.user.findMany({
+        select: { id: true, username: true, role: true, created_at: true }
+    });
+    res.json(users);
+});
+app.post('/api/users', authenticate, requireAdmin, async (req, res) => {
+    const { username, password, role } = req.body;
+    try {
+        const password_hash = await bcryptjs_1.default.hash(password, 10);
+        const user = await prisma_1.default.user.create({
+            data: { username, password_hash, role }
+        });
+        res.json({ id: user.id, username: user.username, role: user.role });
+    }
+    catch (error) {
+        res.status(400).json({ error: 'Could not create user (Username taken?)' });
+    }
+});
+app.delete('/api/users/:id', authenticate, requireAdmin, async (req, res) => {
+    if (req.params.id === req.user.id) {
+        return res.status(400).json({ error: 'Cannot delete yourself' });
+    }
+    await prisma_1.default.user.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+});
+app.put('/api/users/:id/role', authenticate, requireAdmin, async (req, res) => {
+    if (req.params.id === req.user.id) {
+        return res.status(400).json({ error: 'Cannot change your own role' });
+    }
+    const { role } = req.body;
+    if (!role)
+        return res.status(400).json({ error: 'Role is required' });
+    const user = await prisma_1.default.user.update({
+        where: { id: req.params.id },
+        data: { role }
+    });
+    res.json({ id: user.id, username: user.username, role: user.role });
+});
+// ------------------------------
+// Partner Auto-Fill Endpoint
+// ------------------------------
+app.get('/api/parties/:id', authenticate, async (req, res) => {
+    const id = String(req.params.id || '').trim().toUpperCase();
+    const requestedType = String(req.query.type || '').trim().toUpperCase();
+    const party = PARTY_DIRECTORY.find(p => {
+        if (p.id !== id)
+            return false;
+        if (!requestedType)
+            return true;
+        return p.type === requestedType;
+    });
+    if (!party) {
+        return res.status(404).json({ error: 'Party not found' });
+    }
+    const activeOrderCount = await prisma_1.default.order.count({
+        where: {
+            customer_supplier_id: { contains: party.id },
+            status: { in: ['QUOTATION', 'PACKING', 'PAID', 'UNPAID'] }
+        }
+    });
+    res.json({
+        ...party,
+        activeOrderCount,
+        riskLevel: riskLevelFromScore(party.reliabilityScore)
+    });
+});
+// ------------------------------
+// Product Endpoints
+// ------------------------------
+app.get('/api/products', authenticate, requireRoles(['INVENTORY_MANAGER', 'PRODUCTION_TECHNICIAN']), async (req, res) => {
+    const products = await prisma_1.default.product.findMany({ orderBy: { last_updated: 'desc' } });
+    res.json(products);
+});
+app.post('/api/products', authenticate, requireRoles(['INVENTORY_MANAGER']), async (req, res) => {
+    try {
+        const data = req.body || {};
+        const normalizedProduct = {
+            ...data,
+            product_code: String(data.product_code || '').trim().toUpperCase(),
+            hsn_code: data.hsn_code ? String(data.hsn_code).trim() : null,
+            gst_rate: data.gst_rate !== undefined ? Number(data.gst_rate) : undefined
+        };
+        if (!normalizedProduct.product_code) {
+            throw new Error('Product code is required');
+        }
+        if (normalizedProduct.gst_rate !== undefined && (!Number.isFinite(normalizedProduct.gst_rate) || normalizedProduct.gst_rate < 0 || normalizedProduct.gst_rate > 40)) {
+            throw new Error('GST rate must be between 0 and 40');
+        }
+        const product = await prisma_1.default.product.upsert({
+            where: { product_code: normalizedProduct.product_code },
+            update: { ...normalizedProduct },
+            create: { ...normalizedProduct },
+        });
+        res.json(product);
+    }
+    catch (error) {
+        res.status(400).json({ error: error?.message || 'Failed to save product' });
+    }
+});
+app.delete('/api/products/:id', authenticate, requireRoles(['INVENTORY_MANAGER']), async (req, res) => {
+    await prisma_1.default.product.delete({ where: { product_code: req.params.id } });
+    res.json({ success: true });
+});
+// ------------------------------
+// Order Endpoints
+// ------------------------------
+app.get('/api/orders', authenticate, async (req, res) => {
+    const { type } = req.query; // 'SALE' or 'PURCHASE'
+    if (type === 'SALE' && !['SYSTEM_ADMIN', 'SALES_EXECUTIVE', 'LOGISTICS_COORDINATOR'].includes(req.user.role)) {
+        return res.status(403).json({ error: 'Sales access restricted' });
+    }
+    if (type === 'PURCHASE' && !['SYSTEM_ADMIN', 'PROCUREMENT_OFFICER'].includes(req.user.role)) {
+        return res.status(403).json({ error: 'Purchasing access restricted' });
+    }
+    const filter = type ? { type: String(type) } : {};
+    const orders = await prisma_1.default.order.findMany({ where: filter, orderBy: { date: 'desc' } });
+    res.json(orders.map(mapOrderForResponse));
+});
+app.post('/api/orders', authenticate, async (req, res) => {
+    try {
+        const data = req.body || {};
+        const orderType = normalizeOrderType(data.type);
+        const role = req.user?.role || '';
+        if (orderType === 'SALE' && !['SYSTEM_ADMIN', 'SALES_EXECUTIVE', 'LOGISTICS_COORDINATOR'].includes(role)) {
+            return res.status(403).json({ error: 'Only Sales/Logistics users can create sales orders' });
+        }
+        if (orderType === 'PURCHASE' && !['SYSTEM_ADMIN', 'PROCUREMENT_OFFICER'].includes(role)) {
+            return res.status(403).json({ error: 'Only Procurement Officers can create purchase orders' });
+        }
+        const status = normalizeOrderStatus(orderType, data.status || 'QUOTATION');
+        if (orderType === 'SALE' && status === 'DISPATCH' && !['SYSTEM_ADMIN', 'LOGISTICS_COORDINATOR'].includes(role)) {
+            return res.status(403).json({ error: 'Only Logistics can dispatch sales orders' });
+        }
+        if (orderType === 'SALE' && status !== 'DISPATCH' && !['SYSTEM_ADMIN', 'SALES_EXECUTIVE'].includes(role)) {
+            return res.status(403).json({ error: 'Only Sales can create quotation/packing sales orders' });
+        }
+        const products = parseOrderLines(data.products);
+        const productsStr = JSON.stringify(products);
+        const orderId = (0, crypto_1.randomUUID)();
+        const invoiceNumber = data.invoice_number ? String(data.invoice_number).trim() : null;
+        const transportInput = data.transport_details || data.transportDetails;
+        const order = await runAcidTransaction(async (tx) => {
+            let complianceData = {};
+            if (orderType === 'SALE' && status === 'DISPATCH') {
+                const productCatalog = await getProductCatalogForOrder(tx, products);
+                complianceData = await (0, compliance_1.evaluateDispatchCompliance)({
+                    orderId,
+                    customerSupplierId: data.customer_supplier_id ? String(data.customer_supplier_id).trim() : null,
+                    invoiceNumber,
+                    products,
+                    productCatalog,
+                    transportDetails: transportInput
+                });
+            }
+            const appliedChanges = getAppliedOrderInventoryChanges(orderType, status, products);
+            await applyInventoryChanges(tx, appliedChanges);
+            return tx.order.create({
+                data: {
+                    order_id: orderId,
+                    type: orderType,
+                    customer_supplier_id: data.customer_supplier_id ? String(data.customer_supplier_id).trim() : null,
+                    status,
+                    ...(invoiceNumber && { invoice_number: invoiceNumber }),
+                    ...(transportInput && status !== 'DISPATCH' && { transport_details: JSON.stringify(transportInput) }),
+                    ...complianceData,
+                    notes: data.notes ? String(data.notes).trim() : null,
+                    products: productsStr
+                }
+            });
+        });
+        res.json(mapOrderForResponse(order));
+    }
+    catch (error) {
+        const message = error?.message || 'Failed to create order';
+        const statusCode = getRequestErrorStatus(error, 400);
+        res.status(statusCode).json({ error: message });
+    }
+});
+app.put('/api/orders/:id', authenticate, async (req, res) => {
+    try {
+        const data = req.body || {};
+        const role = req.user?.role || '';
+        const order = await runAcidTransaction(async (tx) => {
+            const existingOrder = await tx.order.findUnique({ where: { order_id: req.params.id } });
+            if (!existingOrder)
+                throw new Error('Order not found');
+            const orderType = normalizeOrderType(existingOrder.type);
+            const existingProducts = parseStoredJsonArray(existingOrder.products);
+            const nextProducts = data.products ? parseOrderLines(data.products) : existingProducts;
+            const nextStatus = data.status
+                ? normalizeOrderStatus(orderType, data.status)
+                : normalizeOrderStatus(orderType, existingOrder.status);
+            const invoiceNumber = data.invoice_number !== undefined
+                ? String(data.invoice_number || '').trim()
+                : existingOrder.invoice_number;
+            const incomingTransport = data.transport_details || data.transportDetails;
+            if (orderType === 'SALE') {
+                if (nextStatus === 'DISPATCH' && !['SYSTEM_ADMIN', 'LOGISTICS_COORDINATOR'].includes(role)) {
+                    throw new Error('Only Logistics can dispatch sales orders');
+                }
+                if (nextStatus !== 'DISPATCH' && !['SYSTEM_ADMIN', 'SALES_EXECUTIVE'].includes(role)) {
+                    throw new Error('Only Sales can modify quotation/packing sales orders');
+                }
+            }
+            else if (!['SYSTEM_ADMIN', 'PROCUREMENT_OFFICER'].includes(role)) {
+                throw new Error('Only Procurement can modify purchase orders');
+            }
+            const oldAppliedChanges = getAppliedOrderInventoryChanges(orderType, normalizeOrderStatus(orderType, existingOrder.status), existingProducts);
+            const newAppliedChanges = getAppliedOrderInventoryChanges(orderType, nextStatus, nextProducts);
+            const netChanges = aggregateInventoryChanges([...newAppliedChanges, ...invertInventoryChanges(oldAppliedChanges)]);
+            await applyInventoryChanges(tx, netChanges);
+            let complianceData = {};
+            if (orderType === 'SALE' && nextStatus === 'DISPATCH') {
+                const transportFromOrder = parseStoredJsonObject(existingOrder.transport_details);
+                const productCatalog = await getProductCatalogForOrder(tx, nextProducts);
+                complianceData = await (0, compliance_1.evaluateDispatchCompliance)({
+                    orderId: existingOrder.order_id,
+                    customerSupplierId: existingOrder.customer_supplier_id,
+                    invoiceNumber,
+                    products: nextProducts,
+                    productCatalog,
+                    transportDetails: incomingTransport || transportFromOrder
+                });
+            }
+            const updateData = {
+                status: nextStatus,
+                notes: data.notes !== undefined ? String(data.notes || '').trim() : existingOrder.notes,
+                products: data.products ? JSON.stringify(nextProducts) : existingOrder.products
+            };
+            if (data.invoice_number !== undefined) {
+                updateData.invoice_number = invoiceNumber || null;
+            }
+            if (incomingTransport && nextStatus !== 'DISPATCH') {
+                updateData.transport_details = JSON.stringify(incomingTransport);
+            }
+            Object.assign(updateData, complianceData);
+            const updateResult = await tx.order.updateMany({
+                where: {
+                    order_id: req.params.id,
+                    status: existingOrder.status,
+                    products: existingOrder.products,
+                    invoice_number: existingOrder.invoice_number,
+                    transport_details: existingOrder.transport_details,
+                    notes: existingOrder.notes
+                },
+                data: updateData
+            });
+            if (updateResult.count !== 1) {
+                throw new Error(`Concurrent order update detected for ${existingOrder.order_id}`);
+            }
+            const updatedOrder = await tx.order.findUnique({ where: { order_id: req.params.id } });
+            if (!updatedOrder)
+                throw new Error('Order not found');
+            return updatedOrder;
+        });
+        res.json(mapOrderForResponse(order));
+    }
+    catch (error) {
+        if (error?.message === 'Order not found') {
+            return res.status(404).json({ error: error.message });
+        }
+        const message = error?.message || 'Failed to update order';
+        const statusCode = getRequestErrorStatus(error, 400);
+        res.status(statusCode).json({ error: message });
+    }
+});
+// ------------------------------
+// Manufacturing Endpoints
+// ------------------------------
+app.get('/api/manufacturing', authenticate, requireRoles(['PRODUCTION_TECHNICIAN']), async (req, res) => {
+    const records = await prisma_1.default.manufacturing.findMany({ orderBy: { start_date: 'desc' } });
+    const parsed = records.map(r => ({
+        ...r,
+        raw_materials: JSON.parse(r.raw_materials || '[]'),
+        output: JSON.parse(r.output || '[]')
+    }));
+    res.json(parsed);
+});
+app.post('/api/manufacturing', authenticate, requireRoles(['PRODUCTION_TECHNICIAN']), async (req, res) => {
+    try {
+        const data = req.body || {};
+        const batchNumber = String(data.batch_number || '').trim().toUpperCase();
+        if (!batchNumber)
+            throw new Error('Batch number is required');
+        const rawMaterials = parseQuantityLines(data.raw_materials, 'raw_materials');
+        const output = parseQuantityLines(data.output, 'output');
+        const mfg = await runAcidTransaction(async (tx) => {
+            const deductions = rawMaterials.map(row => ({ product_code: row.product_code, quantityDelta: -row.quantity }));
+            await applyInventoryChanges(tx, deductions);
+            return tx.manufacturing.create({
+                data: {
+                    batch_number: batchNumber,
+                    raw_materials: JSON.stringify(rawMaterials),
+                    output: JSON.stringify(output),
+                    status: 'WIP'
+                }
+            });
+        });
+        res.json({
+            ...mfg,
+            raw_materials: parseStoredJsonArray(mfg.raw_materials),
+            output: parseStoredJsonArray(mfg.output)
+        });
+    }
+    catch (error) {
+        const statusCode = getRequestErrorStatus(error, 400);
+        res.status(statusCode).json({ error: error?.message || 'Failed to create manufacturing batch' });
+    }
+});
+app.put('/api/manufacturing/:id', authenticate, requireRoles(['PRODUCTION_TECHNICIAN']), async (req, res) => {
+    try {
+        const data = req.body || {};
+        const mfg = await runAcidTransaction(async (tx) => {
+            const existing = await tx.manufacturing.findUnique({
+                where: { batch_number: String(req.params.id || '').trim().toUpperCase() }
+            });
+            if (!existing)
+                throw new Error('Batch not found');
+            const existingStatus = String(existing.status || '').toUpperCase();
+            const nextStatus = String(data.status || existingStatus).toUpperCase();
+            if (!['WIP', 'COMPLETED'].includes(nextStatus))
+                throw new Error('Invalid status');
+            if (existingStatus === 'COMPLETED' && nextStatus !== 'COMPLETED') {
+                throw new Error('Completed batches cannot be reopened');
+            }
+            const existingOutput = parseStoredJsonArray(existing.output);
+            const nextOutput = data.output ? parseQuantityLines(data.output, 'output') : existingOutput;
+            const oldApplied = existingStatus === 'COMPLETED'
+                ? existingOutput.map(row => ({ product_code: row.product_code, quantityDelta: row.quantity }))
+                : [];
+            const newApplied = nextStatus === 'COMPLETED'
+                ? nextOutput.map(row => ({ product_code: row.product_code, quantityDelta: row.quantity }))
+                : [];
+            const netChanges = aggregateInventoryChanges([...newApplied, ...invertInventoryChanges(oldApplied)]);
+            await applyInventoryChanges(tx, netChanges);
+            const updateData = {
+                status: nextStatus,
+                ...(data.output && { output: JSON.stringify(nextOutput) }),
+                ...(existingStatus !== 'COMPLETED' && nextStatus === 'COMPLETED' && { end_date: new Date() })
+            };
+            const updateResult = await tx.manufacturing.updateMany({
+                where: {
+                    batch_number: existing.batch_number,
+                    status: existing.status,
+                    output: existing.output,
+                    end_date: existing.end_date
+                },
+                data: updateData
+            });
+            if (updateResult.count !== 1) {
+                throw new Error(`Concurrent manufacturing update detected for ${existing.batch_number}`);
+            }
+            const updatedBatch = await tx.manufacturing.findUnique({
+                where: { batch_number: existing.batch_number }
+            });
+            if (!updatedBatch)
+                throw new Error('Batch not found');
+            return updatedBatch;
+        });
+        res.json({
+            ...mfg,
+            raw_materials: parseStoredJsonArray(mfg.raw_materials),
+            output: parseStoredJsonArray(mfg.output)
+        });
+    }
+    catch (error) {
+        if (error?.message === 'Batch not found') {
+            return res.status(404).json({ error: error.message });
+        }
+        const statusCode = getRequestErrorStatus(error, 400);
+        res.status(statusCode).json({ error: error?.message || 'Failed to update manufacturing batch' });
+    }
+});
+// ------------------------------
+// Dashboard Stats Endpoint
+// ------------------------------
+app.get('/api/dashboard/stats', authenticate, async (req, res) => {
+    try {
+        const products = await prisma_1.default.product.findMany();
+        const totalValue = products.reduce((sum, p) => sum + (p.price * p.quantity), 0);
+        const lowStockCount = products.filter((p) => p.quantity < MIN_STOCK_THRESHOLD).length;
+        const criticalCount = products.filter((p) => p.quantity < CRITICAL_STOCK_THRESHOLD).length;
+        const pendingOrders = await prisma_1.default.order.count({
+            where: {
+                OR: [
+                    { type: 'SALE', status: { in: ['QUOTATION', 'PACKING'] } },
+                    { type: 'PURCHASE', status: { in: ['QUOTATION', 'PAID', 'UNPAID'] } }
+                ]
+            }
+        });
+        const activeBatches = await prisma_1.default.manufacturing.count({ where: { status: 'WIP' } });
+        // Recent activity from orders and manufacturing
+        const recentOrders = await prisma_1.default.order.findMany({ orderBy: { date: 'desc' }, take: 5 });
+        const recentMfg = await prisma_1.default.manufacturing.findMany({ orderBy: { start_date: 'desc' }, take: 3 });
+        const activity = [
+            ...recentOrders.map((o) => ({
+                type: o.type === 'SALE' ? 'sale' : 'purchase',
+                description: `${o.type} order ${o.status.toLowerCase()} - ${o.customer_supplier_id || 'Unknown'}`,
+                status: o.status,
+                date: o.date,
+                id: o.order_id
+            })),
+            ...recentMfg.map((m) => ({
+                type: 'manufacturing',
+                description: `Batch ${m.batch_number} - ${m.status}`,
+                status: m.status,
+                date: m.start_date,
+                id: m.batch_number
+            }))
+        ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 8);
+        res.json({
+            totalProducts: products.length,
+            totalInventoryValue: totalValue,
+            lowStockCount,
+            criticalCount,
+            pendingOrders,
+            activeBatches,
+            activity
+        });
+    }
+    catch (error) {
+        res.status(500).json({ error: 'Failed to load dashboard stats' });
+    }
+});
+// ------------------------------
+// Compliance Summary Endpoint
+// ------------------------------
+app.get('/api/compliance/summary', authenticate, async (req, res) => {
+    try {
+        const summary = await (0, compliance_1.buildComplianceSummary)(prisma_1.default);
+        res.json(summary);
+    }
+    catch (error) {
+        res.status(500).json({ error: 'Failed to load compliance summary' });
+    }
+});
+// ------------------------------
+// CRDT Synchronization Endpoints
+// ------------------------------
+app.get('/api/inventory/crdt/summary', authenticate, async (req, res) => {
+    try {
+        const products = await prisma_1.default.product.findMany({
+            select: {
+                product_code: true,
+                name: true,
+                quantity: true,
+                crdt_p: true,
+                crdt_n: true,
+                crdt_last_node: true,
+                crdt_last_merged_at: true
+            },
+            orderBy: { product_code: 'asc' }
+        });
+        const nodeSet = new Set();
+        let driftCount = 0;
+        const rows = products.map((product) => {
+            const state = deriveProductStockState(product);
+            Object.keys(state.p).forEach(node => nodeSet.add(node));
+            Object.keys(state.n).forEach(node => nodeSet.add(node));
+            const persistedQty = Number(product.quantity || 0);
+            const drift = persistedQty - state.value;
+            if (drift !== 0)
+                driftCount += 1;
+            return {
+                product_code: product.product_code,
+                name: product.name,
+                persisted_quantity: persistedQty,
+                crdt_quantity: state.value,
+                drift,
+                p: state.p,
+                n: state.n,
+                last_node: product.crdt_last_node || null,
+                last_merged_at: product.crdt_last_merged_at
+            };
+        });
+        res.json({
+            generatedAt: new Date().toISOString(),
+            cloudNodeId: CRDT_CLOUD_NODE_ID,
+            productCount: rows.length,
+            replicationNodeCount: nodeSet.size,
+            replicationNodes: Array.from(nodeSet.values()).sort(),
+            convergedCount: rows.length - driftCount,
+            driftCount,
+            rows
+        });
+    }
+    catch (error) {
+        res.status(500).json({ error: 'Failed to load CRDT summary' });
+    }
+});
+app.post('/api/inventory/crdt/merge', authenticate, requireRoles(['INVENTORY_MANAGER', 'LOGISTICS_COORDINATOR', 'PRODUCTION_TECHNICIAN']), async (req, res) => {
+    try {
+        const payload = req.body || {};
+        const nodeId = (0, crdt_1.normalizeNodeId)(payload.node_id || payload.nodeId || req.user?.username || 'REMOTE_NODE');
+        const rows = parseCrdtSnapshotRows(payload.rows || payload.states || payload.snapshots);
+        const mergeResult = await runAcidTransaction(async (tx) => {
+            const productCodes = Array.from(new Set(rows.map(row => row.product_code)));
+            const products = await tx.product.findMany({
+                where: { product_code: { in: productCodes } },
+                select: {
+                    product_code: true,
+                    quantity: true,
+                    crdt_p: true,
+                    crdt_n: true
+                }
+            });
+            const productMap = new Map(products.map((product) => [String(product.product_code), product]));
+            for (const code of productCodes) {
+                if (!productMap.has(code)) {
+                    throw new Error(`Unknown product code in CRDT merge: ${code}`);
+                }
+            }
+            let updatedProducts = 0;
+            let noopProducts = 0;
+            let mergedPositive = 0;
+            let mergedNegative = 0;
+            const details = [];
+            for (const row of rows) {
+                const product = productMap.get(row.product_code);
+                const currentState = deriveProductStockState(product);
+                const mergedState = (0, crdt_1.mergeNodeSnapshotIntoState)(currentState, nodeId, { p: row.p, n: row.n });
+                if (mergedState.value < 0) {
+                    throw new Error(`CRDT merge would make stock negative for ${row.product_code}`);
+                }
+                if (mergedState.changed || currentState.bootstrapped) {
+                    await persistProductStockState(tx, product, mergedState, nodeId);
+                    productMap.set(row.product_code, {
+                        ...product,
+                        quantity: mergedState.value,
+                        crdt_p: (0, crdt_1.serializeCounter)(mergedState.p),
+                        crdt_n: (0, crdt_1.serializeCounter)(mergedState.n)
+                    });
+                    updatedProducts += 1;
+                }
+                else {
+                    noopProducts += 1;
+                }
+                mergedPositive += mergedState.mergedPositive;
+                mergedNegative += mergedState.mergedNegative;
+                details.push({
+                    product_code: row.product_code,
+                    merged_positive: mergedState.mergedPositive,
+                    merged_negative: mergedState.mergedNegative,
+                    quantity: mergedState.value,
+                    changed: mergedState.changed || currentState.bootstrapped
+                });
+            }
+            return {
+                updatedProducts,
+                noopProducts,
+                mergedPositive,
+                mergedNegative,
+                netMerged: mergedPositive - mergedNegative,
+                details
+            };
+        });
+        res.json({
+            generatedAt: new Date().toISOString(),
+            mode: 'PN_COUNTER_MAX_MERGE',
+            nodeId,
+            ...mergeResult
+        });
+    }
+    catch (error) {
+        const statusCode = getRequestErrorStatus(error, 400);
+        res.status(statusCode).json({ error: error?.message || 'Failed to merge CRDT snapshots' });
+    }
+});
+// ------------------------------
+// Risk Insights Endpoint
+// ------------------------------
+app.get('/api/insights/risk-summary', authenticate, async (req, res) => {
+    try {
+        const [products, salePipeline, purchasePipeline, recentDispatchedSales] = await Promise.all([
+            prisma_1.default.product.findMany({ orderBy: { product_code: 'asc' } }),
+            prisma_1.default.order.findMany({
+                where: { type: 'SALE', status: { in: ['QUOTATION', 'PACKING'] } },
+                orderBy: { date: 'asc' }
+            }),
+            prisma_1.default.order.findMany({
+                where: { type: 'PURCHASE', status: { in: ['QUOTATION', 'PAID', 'UNPAID'] } },
+                orderBy: { date: 'asc' }
+            }),
+            prisma_1.default.order.findMany({
+                where: {
+                    type: 'SALE',
+                    status: 'DISPATCH',
+                    date: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
+                }
+            })
+        ]);
+        const projectedStock = new Map(products.map((product) => [product.product_code, product.quantity]));
+        const atRiskOrders = [];
+        for (const order of salePipeline) {
+            const orderProducts = parseStoredJsonArray(order.products);
+            const shortages = [];
+            for (const line of orderProducts) {
+                const currentQty = projectedStock.get(line.product_code) ?? 0;
+                const projectedAfterCommit = currentQty - line.quantity;
+                projectedStock.set(line.product_code, projectedAfterCommit);
+                if (projectedAfterCommit < 0) {
+                    shortages.push({
+                        product_code: line.product_code,
+                        required: line.quantity,
+                        projected_after_commit: projectedAfterCommit
+                    });
+                }
+            }
+            if (shortages.length > 0) {
+                atRiskOrders.push({
+                    order_id: order.order_id,
+                    customer_supplier_id: order.customer_supplier_id || 'Unknown',
+                    ageDays: daysSince(order.date),
+                    shortageCount: shortages.length,
+                    shortages
+                });
+            }
+        }
+        const demandByProduct = new Map();
+        for (const order of recentDispatchedSales) {
+            const orderProducts = parseStoredJsonArray(order.products);
+            for (const line of orderProducts) {
+                demandByProduct.set(line.product_code, (demandByProduct.get(line.product_code) || 0) + line.quantity);
+            }
+        }
+        const reorderRecommendations = products
+            .map((product) => {
+            const projectedQty = projectedStock.get(product.product_code) ?? product.quantity;
+            const monthlyDemand = demandByProduct.get(product.product_code) || 0;
+            const avgDailyDemand = monthlyDemand / 30;
+            const daysOfCover = avgDailyDemand > 0 ? projectedQty / avgDailyDemand : 999;
+            const demandBuffer = Math.ceil(avgDailyDemand * 7);
+            const recommendedQty = Math.max(MIN_STOCK_THRESHOLD - projectedQty, 0) + demandBuffer;
+            if (recommendedQty <= 0 && projectedQty >= MIN_STOCK_THRESHOLD && daysOfCover > 10) {
+                return null;
+            }
+            return {
+                product_code: product.product_code,
+                name: product.name,
+                currentQty: product.quantity,
+                projectedQty,
+                avgDailyDemand: Number(avgDailyDemand.toFixed(2)),
+                daysOfCover: Number(daysOfCover.toFixed(1)),
+                recommendedQty,
+                severity: projectedQty < CRITICAL_STOCK_THRESHOLD || daysOfCover <= 3
+                    ? 'HIGH'
+                    : projectedQty < MIN_STOCK_THRESHOLD || daysOfCover <= 7
+                        ? 'MEDIUM'
+                        : 'LOW'
+            };
+        })
+            .filter((item) => Boolean(item))
+            .sort((a, b) => a.projectedQty - b.projectedQty || b.recommendedQty - a.recommendedQty)
+            .slice(0, 8);
+        const delayedPurchases = purchasePipeline
+            .map((order) => ({
+            order_id: order.order_id,
+            supplier: order.customer_supplier_id || 'Unknown',
+            status: order.status,
+            ageDays: daysSince(order.date),
+            severity: order.status === 'PAID' && daysSince(order.date) > 7
+                ? 'HIGH'
+                : daysSince(order.date) > 4
+                    ? 'MEDIUM'
+                    : 'LOW'
+        }))
+            .filter((order) => (order.status === 'PAID' && order.ageDays > 3) || (order.status === 'UNPAID' && order.ageDays > 5))
+            .sort((a, b) => b.ageDays - a.ageDays)
+            .slice(0, 6);
+        res.json({
+            generatedAt: new Date().toISOString(),
+            stockoutRiskCount: atRiskOrders.length,
+            delayedPurchaseCount: delayedPurchases.length,
+            reorderRecommendationCount: reorderRecommendations.length,
+            atRiskOrders: atRiskOrders.slice(0, 6),
+            reorderRecommendations,
+            delayedPurchases
+        });
+    }
+    catch (error) {
+        res.status(500).json({ error: 'Failed to load risk insights' });
+    }
+});
+// ------------------------------
+// CSV Export Endpoint
+// ------------------------------
+app.get('/api/export/orders', authenticate, async (req, res) => {
+    const { type } = req.query;
+    const filter = type ? { type: String(type) } : {};
+    const orders = await prisma_1.default.order.findMany({ where: filter, orderBy: { date: 'desc' } });
+    const header = 'Order ID,Type,Customer/Supplier,Status,Invoice Number,E-Way Bill Number,E-Way Status,Date,Products,Notes\n';
+    const rows = orders.map((o) => {
+        const prods = JSON.parse(o.products || '[]');
+        const prodSummary = prods.map((p) => `${p.product_code}x${p.quantity}`).join('; ');
+        const total = prods.reduce((s, p) => s + (p.price * p.quantity), 0);
+        return `"${o.order_id}","${o.type}","${o.customer_supplier_id || ''}","${o.status}","${o.invoice_number || ''}","${o.eway_bill_number || ''}","${o.eway_bill_status || ''}","${new Date(o.date).toLocaleDateString()}","${prodSummary} (Rs. ${total.toFixed(2)})","${(o.notes || '').replace(/"/g, '""')}"`;
+    }).join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=orders_${type || 'all'}_${Date.now()}.csv`);
+    res.send(header + rows);
+});
+app.get('/api/export/manufacturing', authenticate, async (req, res) => {
+    const records = await prisma_1.default.manufacturing.findMany({ orderBy: { start_date: 'desc' } });
+    const header = 'Batch Number,Status,Start Date,End Date,Raw Materials,Output\n';
+    const rows = records.map((m) => {
+        const raw = JSON.parse(m.raw_materials || '[]').map((r) => `${r.product_code}x${r.quantity}`).join('; ');
+        const out = JSON.parse(m.output || '[]').map((o) => `${o.product_code}x${o.quantity}`).join('; ');
+        return `"${m.batch_number}","${m.status}","${new Date(m.start_date).toLocaleDateString()}","${m.end_date ? new Date(m.end_date).toLocaleDateString() : ''}","${raw}","${out}"`;
+    }).join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=manufacturing_${Date.now()}.csv`);
+    res.send(header + rows);
+});
+// Start server only outside Vercel serverless runtime
+if (!process.env.VERCEL) {
+    app.listen(PORT, () => {
+        console.log(`Backend APIs running on port ${PORT}`);
+    });
+}
+exports.default = app;

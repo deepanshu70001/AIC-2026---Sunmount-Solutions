@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { API_URL as API } from '../../config/api';
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -33,7 +34,7 @@ const AIChatWidget = () => {
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:3001/api/chat', {
+      const response = await fetch(`${API}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

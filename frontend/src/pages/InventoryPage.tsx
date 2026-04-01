@@ -1,18 +1,20 @@
 import { useState, useEffect } from 'react';
 import SideNavBar from '../components/layout/SideNavBar';
 import TopNavBar from '../components/layout/TopNavBar';
+import { API_URL as API } from '../config/api';
 
 interface Product {
   product_code: string;
   name: string;
   description: string;
+  hsn_code?: string;
+  gst_rate?: number;
   weight: number;
   price: number;
   quantity: number;
   last_updated: string;
 }
 
-const API = 'http://localhost:3001/api';
 const authHeaders = () => ({
   'Content-Type': 'application/json',
   Authorization: `Bearer ${localStorage.getItem('token')}`
@@ -26,7 +28,16 @@ const InventoryPage = () => {
   const [search, setSearch] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({ product_code: '', name: '', description: '', weight: 0, price: 0, quantity: 0 });
+  const [formData, setFormData] = useState({
+    product_code: '',
+    name: '',
+    description: '',
+    hsn_code: '',
+    gst_rate: 18,
+    weight: 0,
+    price: 0,
+    quantity: 0
+  });
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -41,11 +52,15 @@ const InventoryPage = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    await fetch(`${API}/products`, { method: 'POST', headers: authHeaders(), body: JSON.stringify(formData) });
+    const payload = {
+      ...formData,
+      hsn_code: formData.hsn_code.trim() || null
+    };
+    await fetch(`${API}/products`, { method: 'POST', headers: authHeaders(), body: JSON.stringify(payload) });
     fetchProducts();
     setShowForm(false);
     setIsEditing(false);
-    setFormData({ product_code: '', name: '', description: '', weight: 0, price: 0, quantity: 0 });
+    setFormData({ product_code: '', name: '', description: '', hsn_code: '', gst_rate: 18, weight: 0, price: 0, quantity: 0 });
   };
 
   const handleDelete = async (code: string) => {
@@ -56,7 +71,16 @@ const InventoryPage = () => {
   };
 
   const startEdit = (p: Product) => {
-    setFormData({ product_code: p.product_code, name: p.name, description: p.description || '', weight: p.weight || 0, price: p.price, quantity: p.quantity });
+    setFormData({
+      product_code: p.product_code,
+      name: p.name,
+      description: p.description || '',
+      hsn_code: p.hsn_code || '',
+      gst_rate: p.gst_rate ?? 18,
+      weight: p.weight || 0,
+      price: p.price,
+      quantity: p.quantity
+    });
     setIsEditing(true);
     setShowForm(true);
   };
@@ -81,7 +105,7 @@ const InventoryPage = () => {
               <div className="flex justify-between items-center mb-3">
                 <h2 className="text-xl font-bold text-primary">Inventory</h2>
                 {['SYSTEM_ADMIN', 'INVENTORY_MANAGER'].includes(currentRole || '') && (
-                  <button onClick={() => { setShowForm(true); setIsEditing(false); setFormData({ product_code: '', name: '', description: '', weight: 0, price: 0, quantity: 0 }); }}
+                  <button onClick={() => { setShowForm(true); setIsEditing(false); setFormData({ product_code: '', name: '', description: '', hsn_code: '', gst_rate: 18, weight: 0, price: 0, quantity: 0 }); }}
                     className="bg-primary text-white p-2 rounded-lg hover:bg-primary-fixed transition-colors shadow-md">
                     <span className="material-symbols-outlined text-[20px]">add</span>
                   </button>
@@ -150,6 +174,19 @@ const InventoryPage = () => {
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Description</label>
                     <input type="text" value={formData.description}
                       onChange={e => setFormData({ ...formData, description: e.target.value })}
+                      className="w-full mt-1 bg-surface border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary/20" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">HSN / SAC Code</label>
+                    <input type="text" value={formData.hsn_code}
+                      onChange={e => setFormData({ ...formData, hsn_code: e.target.value.toUpperCase() })}
+                      className="w-full mt-1 bg-surface border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary/20"
+                      placeholder="e.g. 7214" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">GST Rate (%)</label>
+                    <input type="number" step="0.01" min="0" max="40" value={formData.gst_rate}
+                      onChange={e => setFormData({ ...formData, gst_rate: Number(e.target.value || 0) })}
                       className="w-full mt-1 bg-surface border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary/20" />
                   </div>
                   <div>
@@ -222,6 +259,14 @@ const InventoryPage = () => {
                     <div>
                       <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Weight</p>
                       <p className="text-sm font-medium text-primary mt-1">{selectedProduct.weight || '—'} kg</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">HSN / SAC</p>
+                      <p className="text-sm font-medium text-primary mt-1">{selectedProduct.hsn_code || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">GST Rate</p>
+                      <p className="text-sm font-medium text-primary mt-1">{selectedProduct.gst_rate ?? 18}%</p>
                     </div>
                     <div>
                       <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Last Updated</p>

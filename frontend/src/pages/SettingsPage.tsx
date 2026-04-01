@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import SideNavBar from '../components/layout/SideNavBar';
 import TopNavBar from '../components/layout/TopNavBar';
+import { API_URL as API } from '../config/api';
 
 const SettingsPage = () => {
   const [users, setUsers] = useState<any[]>([]);
@@ -12,7 +13,7 @@ const SettingsPage = () => {
 
   const fetchUsers = async () => {
     try {
-      const res = await fetch('http://localhost:3001/api/users', {
+      const res = await fetch(`${API}/users`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
       if (res.ok) {
@@ -36,7 +37,7 @@ const SettingsPage = () => {
     setError('');
     
     try {
-      const res = await fetch('http://localhost:3001/api/users', {
+      const res = await fetch(`${API}/users`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -63,7 +64,7 @@ const SettingsPage = () => {
   const handleDelete = async (id: string) => {
     if (!window.confirm("Delete this user?")) return;
     try {
-      await fetch(`http://localhost:3001/api/users/${id}`, {
+      await fetch(`${API}/users/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
@@ -73,7 +74,7 @@ const SettingsPage = () => {
 
   const handleRoleChange = async (id: string, newRole: string) => {
     try {
-      await fetch(`http://localhost:3001/api/users/${id}/role`, {
+      await fetch(`${API}/users/${id}/role`, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',

@@ -5,32 +5,46 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite" // production change to postgresql
-
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
 }
 
 model Product {
-  product_code String   @id
+  product_code String   @id @map("_id")
   name         String
   description  String?
+  hsn_code     String?
+  gst_rate     Float    @default(18)
   weight       Float?
   price        Float
   quantity     Int      @default(0)
+  crdt_p       String   @default("{}")
+  crdt_n       String   @default("{}")
+  crdt_last_node String?
+  crdt_last_merged_at DateTime?
   last_updated DateTime @updatedAt
 }
 
 model Order {
-  order_id             String   @id @default(uuid())
+  order_id             String   @id @default(uuid()) @map("_id")
   type                 String   // "SALE" or "PURCHASE"
   customer_supplier_id String?  
-  products             String   // Storing JSON string of products due to SQLite lacking JSON
+  products             String   // Storing JSON string for flexible order lines
   status               String   @default("QUOTATION") // QUOTATION, PACKING, DISPATCH, COMPLETED
   date                 DateTime @default(now())
+  invoice_number       String?
+  transport_details    String?
+  eway_bill_required   Boolean  @default(false)
+  eway_bill_status     String?  @default("PENDING")
+  eway_bill_number     String?
+  eway_bill_generated_at DateTime?
+  eway_bill_valid_upto DateTime?
+  compliance_meta      String?
   notes                String?
 }
 
 model Manufacturing {
-  batch_number  String   @id
+  batch_number  String   @id @map("_id")
   raw_materials String   // JSON string
   output        String   // JSON string
   status        String   @default("WIP")
@@ -39,10 +53,9 @@ model Manufacturing {
 }
 
 model User {
-  id            String   @id @default(uuid())
+  id            String   @id @default(uuid()) @map("_id")
   username      String   @unique
   password_hash String
   role          String   @default("SYSTEM_ADMIN") // SYSTEM_ADMIN, INVENTORY_MANAGER, SALES_EXECUTIVE, PROCUREMENT_OFFICER, PRODUCTION_TECHNICIAN, LOGISTICS_COORDINATOR
   created_at    DateTime @default(now())
 }
-

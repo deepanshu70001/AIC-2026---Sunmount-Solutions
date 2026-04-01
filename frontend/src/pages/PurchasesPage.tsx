@@ -1,17 +1,31 @@
 import { useState, useEffect } from 'react';
 import SideNavBar from '../components/layout/SideNavBar';
 import TopNavBar from '../components/layout/TopNavBar';
+import { API_URL as API } from '../config/api';
 
-const API = 'http://localhost:3001/api';
 const authHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` });
+
+interface PartyInfo {
+  id: string;
+  name: string;
+  contactPerson: string;
+  phone: string;
+  paymentTerms: string;
+  reliabilityScore: number;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  activeOrderCount: number;
+}
 
 export default function PurchasesPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [isNewForm, setIsNewForm] = useState(false);
-  const [supplier, setSupplier] = useState('');
+  const [supplierId, setSupplierId] = useState('');
+  const [supplierName, setSupplierName] = useState('');
   const [notes, setNotes] = useState('');
   const [products, setProducts] = useState<any[]>([{ product_code: '', quantity: 1, price: 0 }]);
+  const [partyInfo, setPartyInfo] = useState<PartyInfo | null>(null);
+  const [partyLookupError, setPartyLookupError] = useState('');
 
   const fetchOrders = async () => {
     try {
@@ -22,13 +36,53 @@ export default function PurchasesPage() {
 
   useEffect(() => { fetchOrders(); }, []);
 
+  const lookupSupplier = async (id: string) => {
+    const normalizedId = id.trim().toUpperCase();
+    if (!normalizedId) {
+      setPartyInfo(null);
+      setPartyLookupError('');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API}/parties/${normalizedId}?type=SUPPLIER`, {
+        headers: authHeaders()
+      });
+      if (!res.ok) {
+        setPartyInfo(null);
+        setPartyLookupError('Supplier ID not found in directory');
+        return;
+      }
+      const data = await res.json();
+      setPartyInfo(data);
+      setSupplierName(data.name || '');
+      setPartyLookupError('');
+    } catch {
+      setPartyInfo(null);
+      setPartyLookupError('Could not fetch supplier profile');
+    }
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    const supplierLabel = supplierId.trim()
+      ? `${supplierId.trim().toUpperCase()} - ${supplierName.trim() || 'Unknown Supplier'}`
+      : supplierName.trim();
+
     const res = await fetch(`${API}/orders`, {
       method: 'POST', headers: authHeaders(),
-      body: JSON.stringify({ type: 'PURCHASE', customer_supplier_id: supplier, notes, status: 'QUOTATION', products })
+      body: JSON.stringify({ type: 'PURCHASE', customer_supplier_id: supplierLabel, notes, status: 'QUOTATION', products })
     });
-    if (res.ok) { fetchOrders(); setIsNewForm(false); setSupplier(''); setNotes(''); setProducts([{ product_code: '', quantity: 1, price: 0 }]); }
+    if (res.ok) {
+      fetchOrders();
+      setIsNewForm(false);
+      setSupplierId('');
+      setSupplierName('');
+      setPartyInfo(null);
+      setPartyLookupError('');
+      setNotes('');
+      setProducts([{ product_code: '', quantity: 1, price: 0 }]);
+    }
   };
 
   const updateStatus = async (id: string, status: string) => {
@@ -61,7 +115,16 @@ export default function PurchasesPage() {
           <div className="w-full lg:w-1/3 flex flex-col gap-4">
             <div className="flex justify-between items-center mb-2">
               <h2 className="text-xl font-black text-primary">Purchase Orders</h2>
-              <button onClick={() => { setIsNewForm(true); setSelectedOrder(null); }}
+              <button onClick={() => {
+                setIsNewForm(true);
+                setSelectedOrder(null);
+                setSupplierId('');
+                setSupplierName('');
+                setPartyInfo(null);
+                setPartyLookupError('');
+                setNotes('');
+                setProducts([{ product_code: '', quantity: 1, price: 0 }]);
+              }}
                 className="bg-primary text-white p-2 rounded-lg hover:bg-primary-fixed transition-colors shadow-md">
                 <span className="material-symbols-outlined text-[20px]">add</span>
               </button>
@@ -75,6 +138,7 @@ export default function PurchasesPage() {
                     <span className={`text-[9px] font-black tracking-wider uppercase px-2 py-1 rounded-full ${
                       order.status === 'QUOTATION' ? 'bg-blue-100 text-blue-700' :
                       order.status === 'PAID' ? 'bg-orange-100 text-orange-700' :
+                      order.status === 'UNPAID' ? 'bg-red-100 text-red-700' :
                       'bg-green-100 text-green-700'
                     }`}>{order.status}</span>
                   </div>
@@ -102,16 +166,50 @@ export default function PurchasesPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Supplier Name / ID</label>
-                    <input type="text" required value={supplier} onChange={e => setSupplier(e.target.value)}
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Supplier ID (Auto-Fill)</label>
+                    <input type="text" required value={supplierId}
+                      onChange={e => {
+                        setSupplierId(e.target.value.toUpperCase());
+                        setPartyLookupError('');
+                      }}
+                      onBlur={() => lookupSupplier(supplierId)}
                       className="w-full mt-1 bg-surface border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary/20" />
+                    <p className="text-[11px] text-slate-500 mt-1">Try: SUP-2001, SUP-2002, SUP-2003</p>
                   </div>
                   <div>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Supplier Name</label>
+                    <input type="text" required value={supplierName} onChange={e => setSupplierName(e.target.value)}
+                      className="w-full mt-1 bg-surface border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary/20" />
+                  </div>
+                  <div className="col-span-2">
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Notes</label>
                     <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
                       className="w-full mt-1 bg-surface border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary/20" />
                   </div>
                 </div>
+
+                {partyInfo && (
+                  <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4">
+                    <div className="flex justify-between items-center gap-3 flex-wrap">
+                      <div>
+                        <p className="text-xs uppercase tracking-widest font-black text-blue-700">Auto-Filled Supplier Profile</p>
+                        <p className="font-bold text-primary">{partyInfo.name}</p>
+                        <p className="text-xs text-slate-600">{partyInfo.contactPerson} | {partyInfo.phone}</p>
+                      </div>
+                      <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-full ${
+                        partyInfo.riskLevel === 'HIGH' ? 'bg-red-100 text-red-700' : partyInfo.riskLevel === 'MEDIUM' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'
+                      }`}>
+                        {partyInfo.riskLevel} Risk
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 mt-2">Payment Terms: {partyInfo.paymentTerms} | Active Orders: {partyInfo.activeOrderCount}</p>
+                  </div>
+                )}
+                {!partyInfo && partyLookupError && (
+                  <div className="rounded-xl border border-orange-100 bg-orange-50/70 p-3 text-xs text-orange-700 font-semibold">
+                    {partyLookupError}
+                  </div>
+                )}
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
                   <h3 className="font-bold text-sm text-primary mb-4 flex justify-between items-center">
                     <span>Order Products (Unlimited Rows)</span>
@@ -160,7 +258,10 @@ export default function PurchasesPage() {
                   </div>
                   <div className="text-right">
                     <span className={`text-[11px] font-black tracking-widest uppercase px-3 py-1.5 rounded-full ${
-                      selectedOrder.status === 'QUOTATION' ? 'bg-blue-100 text-blue-700' : selectedOrder.status === 'PAID' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'
+                      selectedOrder.status === 'QUOTATION' ? 'bg-blue-100 text-blue-700' :
+                      selectedOrder.status === 'PAID' ? 'bg-orange-100 text-orange-700' :
+                      selectedOrder.status === 'UNPAID' ? 'bg-red-100 text-red-700' :
+                      'bg-green-100 text-green-700'
                     }`}>{selectedOrder.status}</span>
                     <p className="text-2xl font-black text-primary mt-4">₹{selectedOrder.products.reduce((a: any, p: any) => a + (p.price * p.quantity), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
                   </div>
@@ -183,7 +284,13 @@ export default function PurchasesPage() {
                 </div>
                 <div className="flex justify-end gap-3 mt-auto">
                   {selectedOrder.status === 'QUOTATION' && (
-                    <button onClick={() => updateStatus(selectedOrder.order_id, 'PAID')} className="bg-orange-100 text-orange-700 px-6 py-2.5 rounded-xl font-bold hover:bg-orange-200 transition-colors">Mark as Paid</button>
+                    <>
+                      <button onClick={() => updateStatus(selectedOrder.order_id, 'UNPAID')} className="bg-red-100 text-red-700 px-6 py-2.5 rounded-xl font-bold hover:bg-red-200 transition-colors">Mark as Unpaid</button>
+                      <button onClick={() => updateStatus(selectedOrder.order_id, 'PAID')} className="bg-orange-100 text-orange-700 px-6 py-2.5 rounded-xl font-bold hover:bg-orange-200 transition-colors">Mark as Paid</button>
+                    </>
+                  )}
+                  {selectedOrder.status === 'UNPAID' && (
+                    <button onClick={() => updateStatus(selectedOrder.order_id, 'PAID')} className="bg-orange-100 text-orange-700 px-6 py-2.5 rounded-xl font-bold hover:bg-orange-200 transition-colors">Move to Paid</button>
                   )}
                   {selectedOrder.status === 'PAID' && (
                     <button onClick={() => updateStatus(selectedOrder.order_id, 'COMPLETED')} className="bg-green-500 text-white px-6 py-2.5 rounded-xl font-bold shadow-lg shadow-green-500/30 hover:scale-105 transition-all">Complete Order</button>

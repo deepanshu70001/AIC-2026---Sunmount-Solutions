@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
 import SideNavBar from '../components/layout/SideNavBar';
 import TopNavBar from '../components/layout/TopNavBar';
+import { API_URL as API } from '../config/api';
 
-const API = 'http://localhost:3001/api';
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
-const jsonHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` });
 
 type Tab = 'SALE' | 'PURCHASE' | 'MANUFACTURING';
 
@@ -57,6 +56,7 @@ export default function HistoryPage() {
     switch (s) {
       case 'QUOTATION': return 'bg-blue-100 text-blue-700';
       case 'PACKING': case 'PAID': case 'WIP': return 'bg-orange-100 text-orange-700';
+      case 'UNPAID': return 'bg-red-100 text-red-700';
       case 'DISPATCH': case 'COMPLETED': return 'bg-green-100 text-green-700';
       default: return 'bg-slate-100 text-slate-600';
     }

@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import SideNavBar from '../components/layout/SideNavBar';
 import TopNavBar from '../components/layout/TopNavBar';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import { Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import { API_URL as API } from '../config/api';
 
-const API = 'http://localhost:3001/api';
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
 const formatCurrency = (amount: number) =>
@@ -19,15 +19,82 @@ interface DashboardStats {
   activity: any[];
 }
 
+interface RiskSummary {
+  stockoutRiskCount: number;
+  delayedPurchaseCount: number;
+  reorderRecommendationCount: number;
+  atRiskOrders: Array<{
+    order_id: string;
+    customer_supplier_id: string;
+    ageDays: number;
+    shortageCount: number;
+  }>;
+  reorderRecommendations: Array<{
+    product_code: string;
+    name: string;
+    projectedQty: number;
+    recommendedQty: number;
+    severity: 'LOW' | 'MEDIUM' | 'HIGH';
+  }>;
+}
+
+interface ComplianceSummary {
+  filingHealth: {
+    compliantCount: number;
+    returnPendingCount: number;
+    blockedCount: number;
+    blockedParties: string[];
+  };
+  ewayBill: {
+    thresholdInr: number;
+    totalDispatchedOrders: number;
+    generatedCount: number;
+    requiredPendingCount: number;
+    blockedOpenDispatchRisk: number;
+  };
+  itcReconciliation: {
+    expectedItc: number;
+    matchedItc: number;
+    mismatchItc: number;
+    discrepancyCount: number;
+    discrepancies: Array<{
+      order_id: string;
+      supplier: string;
+      mismatchPercent: number;
+      mismatchItc: number;
+      filingStatus: string;
+    }>;
+  };
+}
+
+interface CrdtSummary {
+  cloudNodeId: string;
+  productCount: number;
+  replicationNodeCount: number;
+  convergedCount: number;
+  driftCount: number;
+}
+
 const Dashboard = () => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [riskSummary, setRiskSummary] = useState<RiskSummary | null>(null);
+  const [complianceSummary, setComplianceSummary] = useState<ComplianceSummary | null>(null);
+  const [crdtSummary, setCrdtSummary] = useState<CrdtSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch(`${API}/dashboard/stats`, { headers: authHeaders() });
-        if (res.ok) setStats(await res.json());
+        const [statsRes, riskRes, complianceRes, crdtRes] = await Promise.all([
+          fetch(`${API}/dashboard/stats`, { headers: authHeaders() }),
+          fetch(`${API}/insights/risk-summary`, { headers: authHeaders() }),
+          fetch(`${API}/compliance/summary`, { headers: authHeaders() }),
+          fetch(`${API}/inventory/crdt/summary`, { headers: authHeaders() }),
+        ]);
+        if (statsRes.ok) setStats(await statsRes.json());
+        if (riskRes.ok) setRiskSummary(await riskRes.json());
+        if (complianceRes.ok) setComplianceSummary(await complianceRes.json());
+        if (crdtRes.ok) setCrdtSummary(await crdtRes.json());
       } catch {} finally { setLoading(false); }
     };
     load();
@@ -129,6 +196,7 @@ const Dashboard = () => {
                     </div>
                     <span className={`text-[9px] font-black tracking-wider uppercase px-2 py-1 rounded-full flex-shrink-0 ${
                       a.status === 'DISPATCH' || a.status === 'COMPLETED' ? 'bg-green-100 text-green-700' :
+                      a.status === 'UNPAID' ? 'bg-red-100 text-red-700' :
                       a.status === 'WIP' || a.status === 'PACKING' ? 'bg-orange-100 text-orange-700' :
                       'bg-blue-100 text-blue-700'
                     }`}>{a.status}</span>
@@ -142,6 +210,201 @@ const Dashboard = () => {
               </div>
             )}
           </div>
+        </div>
+
+        <div className="bg-surface-container-lowest rounded-xl material-3d-shadow p-6 border border-slate-100">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+            <div>
+              <h3 className="text-xl font-bold text-primary">Real-World Fulfillment Risks</h3>
+              <p className="text-xs text-slate-500">Stockout prediction + procurement action recommendations</p>
+            </div>
+            <span className="text-[11px] uppercase tracking-wider font-black px-3 py-1 rounded-full bg-primary/10 text-primary">
+              Differentiator Feature
+            </span>
+          </div>
+
+          {riskSummary ? (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div className="rounded-xl border border-red-100 bg-red-50/70 p-4">
+                  <p className="text-xs uppercase tracking-widest font-black text-red-700">Stockout Risks</p>
+                  <p className="text-2xl font-black text-red-700 mt-1">{riskSummary.stockoutRiskCount}</p>
+                </div>
+                <div className="rounded-xl border border-orange-100 bg-orange-50/70 p-4">
+                  <p className="text-xs uppercase tracking-widest font-black text-orange-700">Delayed Purchases</p>
+                  <p className="text-2xl font-black text-orange-700 mt-1">{riskSummary.delayedPurchaseCount}</p>
+                </div>
+                <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4">
+                  <p className="text-xs uppercase tracking-widest font-black text-blue-700">Reorder Suggestions</p>
+                  <p className="text-2xl font-black text-blue-700 mt-1">{riskSummary.reorderRecommendationCount}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <h4 className="text-sm font-black uppercase tracking-wider text-slate-600 mb-3">Orders at Risk</h4>
+                  {riskSummary.atRiskOrders.length > 0 ? (
+                    <div className="space-y-2">
+                      {riskSummary.atRiskOrders.map((order) => (
+                        <div key={order.order_id} className="flex items-center justify-between text-sm border-b border-slate-100 pb-2 last:border-b-0 last:pb-0">
+                          <div>
+                            <p className="font-bold text-primary">{order.customer_supplier_id}</p>
+                            <p className="text-xs text-slate-500">ID {order.order_id.slice(0, 8)}... | {order.shortageCount} SKU shortages</p>
+                          </div>
+                          <span className="text-[10px] font-black uppercase px-2 py-1 rounded-full bg-red-100 text-red-700">
+                            {order.ageDays}d old
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-green-700 font-semibold">No stockout risks detected in open sales pipeline.</p>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <h4 className="text-sm font-black uppercase tracking-wider text-slate-600 mb-3">Top Reorder Actions</h4>
+                  {riskSummary.reorderRecommendations.length > 0 ? (
+                    <div className="space-y-2">
+                      {riskSummary.reorderRecommendations.slice(0, 5).map((item) => (
+                        <div key={item.product_code} className="flex items-center justify-between text-sm border-b border-slate-100 pb-2 last:border-b-0 last:pb-0">
+                          <div>
+                            <p className="font-bold text-primary">{item.name}</p>
+                            <p className="text-xs text-slate-500">{item.product_code} | projected {item.projectedQty} units</p>
+                          </div>
+                          <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-full ${
+                            item.severity === 'HIGH' ? 'bg-red-100 text-red-700' : item.severity === 'MEDIUM' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            +{item.recommendedQty}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-green-700 font-semibold">No immediate reorder actions required.</p>
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-slate-500">Loading risk insights...</p>
+          )}
+        </div>
+
+        <div className="mt-8 bg-surface-container-lowest rounded-xl material-3d-shadow p-6 border border-slate-100">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+            <div>
+              <h3 className="text-xl font-bold text-primary">GST and E-Way Bill Control Tower</h3>
+              <p className="text-xs text-slate-500">Zero-touch compliance monitoring for dispatch continuity</p>
+            </div>
+            <span className="text-[11px] uppercase tracking-wider font-black px-3 py-1 rounded-full bg-green-100 text-green-700">
+              Compliance 2.0
+            </span>
+          </div>
+
+          {complianceSummary ? (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div className="rounded-xl border border-green-100 bg-green-50/70 p-4">
+                  <p className="text-xs uppercase tracking-widest font-black text-green-700">Compliant Parties</p>
+                  <p className="text-2xl font-black text-green-700 mt-1">{complianceSummary.filingHealth.compliantCount}</p>
+                  <p className="text-xs text-green-700 mt-1">{complianceSummary.filingHealth.returnPendingCount} pending returns</p>
+                </div>
+                <div className="rounded-xl border border-red-100 bg-red-50/70 p-4">
+                  <p className="text-xs uppercase tracking-widest font-black text-red-700">Blocked Dispatch Risk</p>
+                  <p className="text-2xl font-black text-red-700 mt-1">{complianceSummary.ewayBill.blockedOpenDispatchRisk}</p>
+                  <p className="text-xs text-red-700 mt-1">{complianceSummary.filingHealth.blockedCount} blocked party profiles</p>
+                </div>
+                <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4">
+                  <p className="text-xs uppercase tracking-widest font-black text-blue-700">ITC Mismatch</p>
+                  <p className="text-2xl font-black text-blue-700 mt-1">{formatCurrency(complianceSummary.itcReconciliation.mismatchItc)}</p>
+                  <p className="text-xs text-blue-700 mt-1">{complianceSummary.itcReconciliation.discrepancyCount} flagged suppliers</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <h4 className="text-sm font-black uppercase tracking-wider text-slate-600 mb-3">E-Way Bill Metrics</h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Threshold (INR)</span>
+                      <span className="font-black text-primary">{formatCurrency(complianceSummary.ewayBill.thresholdInr)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Dispatched Orders</span>
+                      <span className="font-black text-primary">{complianceSummary.ewayBill.totalDispatchedOrders}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Bills Generated</span>
+                      <span className="font-black text-green-700">{complianceSummary.ewayBill.generatedCount}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Required Pending</span>
+                      <span className="font-black text-red-700">{complianceSummary.ewayBill.requiredPendingCount}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <h4 className="text-sm font-black uppercase tracking-wider text-slate-600 mb-3">ITC Reconciliation Alerts</h4>
+                  {complianceSummary.itcReconciliation.discrepancies.length > 0 ? (
+                    <div className="space-y-2">
+                      {complianceSummary.itcReconciliation.discrepancies.slice(0, 5).map((item) => (
+                        <div key={item.order_id} className="flex items-center justify-between text-sm border-b border-slate-100 pb-2 last:border-b-0 last:pb-0">
+                          <div>
+                            <p className="font-bold text-primary">{item.supplier}</p>
+                            <p className="text-xs text-slate-500">Order {item.order_id.slice(0, 8)}... | {item.filingStatus}</p>
+                          </div>
+                          <span className="text-[10px] font-black uppercase px-2 py-1 rounded-full bg-red-100 text-red-700">
+                            {item.mismatchPercent}% ({formatCurrency(item.mismatchItc)})
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-green-700 font-semibold">No major ITC mismatches detected.</p>
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-slate-500">Loading compliance insights...</p>
+          )}
+        </div>
+
+        <div className="mt-8 bg-surface-container-lowest rounded-xl material-3d-shadow p-6 border border-slate-100">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+            <div>
+              <h3 className="text-xl font-bold text-primary">Distributed Sync Resilience (CRDT)</h3>
+              <p className="text-xs text-slate-500">Offline-first PN-counter replication health across cloud and edge nodes</p>
+            </div>
+            <span className="text-[11px] uppercase tracking-wider font-black px-3 py-1 rounded-full bg-indigo-100 text-indigo-700">
+              CRDT Engine
+            </span>
+          </div>
+
+          {crdtSummary ? (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="rounded-xl border border-indigo-100 bg-indigo-50/70 p-4">
+                <p className="text-xs uppercase tracking-widest font-black text-indigo-700">Cloud Node</p>
+                <p className="text-sm font-black text-indigo-700 mt-1">{crdtSummary.cloudNodeId}</p>
+              </div>
+              <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4">
+                <p className="text-xs uppercase tracking-widest font-black text-blue-700">Replication Nodes</p>
+                <p className="text-2xl font-black text-blue-700 mt-1">{crdtSummary.replicationNodeCount}</p>
+              </div>
+              <div className="rounded-xl border border-green-100 bg-green-50/70 p-4">
+                <p className="text-xs uppercase tracking-widest font-black text-green-700">Converged SKUs</p>
+                <p className="text-2xl font-black text-green-700 mt-1">{crdtSummary.convergedCount}/{crdtSummary.productCount}</p>
+              </div>
+              <div className="rounded-xl border border-red-100 bg-red-50/70 p-4">
+                <p className="text-xs uppercase tracking-widest font-black text-red-700">Drifted SKUs</p>
+                <p className="text-2xl font-black text-red-700 mt-1">{crdtSummary.driftCount}</p>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">Loading CRDT replication summary...</p>
+          )}
         </div>
       </main>
       <div className="fixed inset-0 pointer-events-none -z-10 bg-surface">

@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import SideNavBar from '../components/layout/SideNavBar';
 import TopNavBar from '../components/layout/TopNavBar';
+import { API_URL as API } from '../config/api';
 
-const API = 'http://localhost:3001/api';
 const authHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` });
 
 export default function ManufacturingPage() {

@@ -1,92 +1,90 @@
-# Inventory Pro — Full Audit & Fix Report
+# Inventory Pro Walkthrough
 
-## Critical Fix Applied: Prisma v7 Driver Adapter Migration
+## 1) Startup Checklist
 
-The backend was **completely non-functional** because Prisma v7 removed its built-in Rust query engine and now mandates **driver adapters**. Calling `new PrismaClient()` with no arguments crashed immediately.
+### Backend
 
-### What Was Fixed
-
-| File | Change |
-|---|---|
-| `backend/src/prisma.ts` | **[NEW]** Centralized Prisma client using `@prisma/adapter-better-sqlite3` |
-| `backend/src/index.ts` | Replaced `import { PrismaClient }` → `import prisma from './prisma'` |
-| `backend/src/chat.ts` | Same replacement — shared single client instance |
-| `backend/tsconfig.json` | Restored `rootDir: "./src"`, scoped `include` to `src/**/*` only |
-| `backend/seed.js` | **[NEW]** Plain JS seed script (bypasses ts-node issues with Prisma v7) |
-| `frontend/components/layout/TopNavBar.tsx` | Shows actual logged-in user/role instead of hardcoded "Alex Sterling" |
-| `frontend/components/layout/SideNavBar.tsx` | Fixed `replace` → `replaceAll` for underscore handling, fixed `'STAFF'` fallback → `'SYSTEM_ADMIN'` |
-| `frontend/pages/SettingsPage.tsx` | Fixed default onboard role from `'STAFF'` (invalid) → `'SALES_EXECUTIVE'`, fixed `replaceAll` |
-
-### New Dependencies Added
-```
-@prisma/adapter-better-sqlite3
-better-sqlite3
-@types/better-sqlite3
+```bash
+cd backend
+cp .env.example .env
+npm install
+npx prisma db push
+npm run seed
+npm run dev
 ```
 
----
+### Frontend
 
-## Test Credentials
-
-| Username | Password | Role | Access |
-|---|---|---|---|
-| `admin` | `password123` | SYSTEM_ADMIN | Full access — all modules + Staff Management |
-| `sales_rep` | `test123` | SALES_EXECUTIVE | Sales Operations, Analytics |
-| `stock_mgr` | `test123` | INVENTORY_MANAGER | Inventory, Analytics |
-| `buyer` | `test123` | PROCUREMENT_OFFICER | Purchases |
-| `factory` | `test123` | PRODUCTION_TECHNICIAN | Inventory, Manufacturing WIP |
-| `dispatch` | `test123` | LOGISTICS_COORDINATOR | Sales Operations (dispatch only) |
-
-> To re-seed: `cd backend && node seed.js`
-
----
-
-## Verified Working ✅
-
-![Login screen with credentials filled in](C:/Users/HP/.gemini/antigravity/brain/652f881f-9f31-41cd-95fb-8f5f82a463ff/.system_generated/click_feedback/click_feedback_1774976284462.png)
-
-![Dashboard after successful login showing correct user/role in top nav](C:/Users/HP/.gemini/antigravity/brain/652f881f-9f31-41cd-95fb-8f5f82a463ff/.system_generated/click_feedback/click_feedback_1774976303142.png)
-
-![Staff Management page with all 6 seeded users and role editing](C:/Users/HP/.gemini/antigravity/brain/652f881f-9f31-41cd-95fb-8f5f82a463ff/.system_generated/click_feedback/click_feedback_1774976388027.png)
-
----
-
-## Known Issue: AI Chatbot
-
-The Groq AI chatbot returns *"Failed to communicate with Groq AI API"* because `backend/.env` has a placeholder API key:
+```bash
+cd frontend
+cp .env.example .env
+npm install
+npm run dev
 ```
-GROQ_API_KEY=your_groq_api_key_here
-```
-**Fix:** Replace with a real key from [console.groq.com](https://console.groq.com).
 
-## Architecture Overview
+## 2) Demo Credentials
 
-```
-backend/
-├── src/
-│   ├── prisma.ts      ← NEW: Centralized Prisma v7 client with SQLite adapter
-│   ├── index.ts       ← Express server, RBAC middleware, all API routes
-│   └── chat.ts        ← Groq AI chatbot endpoint
-├── prisma/
-│   └── schema.prisma  ← Product, Order, Manufacturing, User models
-├── seed.js            ← NEW: Plain JS database seeder
-└── dev.db             ← SQLite database
+- `admin / password123`
+- `sales_rep / test123`
+- `stock_mgr / test123`
+- `buyer / test123`
+- `factory / test123`
+- `dispatch / test123`
 
-frontend/
-├── src/
-│   ├── App.tsx         ← Router with auth gate
-│   ├── pages/
-│   │   ├── Login.tsx          ← bcrypt auth → JWT
-│   │   ├── Dashboard.tsx      ← KPI grid, charts (mock data)
-│   │   ├── InventoryPage.tsx  ← Master/detail (mock data)
-│   │   ├── SalesPage.tsx      ← Master/detail with unlimited product rows
-│   │   ├── SettingsPage.tsx   ← Admin-only staff CRUD
-│   │   └── StubPage.tsx       ← Placeholder for Purchases/Mfg/Reports
-│   └── components/
-│       ├── layout/
-│       │   ├── SideNavBar.tsx ← Role-based nav visibility
-│       │   └── TopNavBar.tsx  ← Dynamic user/role display
-│       ├── dashboard/         ← KPI, charts, tables, feed
-│       └── chat/
-│           └── AIChatWidget.tsx ← Floating Groq chatbot
-```
+## 3) Core Hackathon Storyline
+
+### A. Compliance Automation (GST + E-Way Bill 2.0)
+
+1. Login as `sales_rep` and create a quotation in Sales.
+2. Move the order to Packing.
+3. Login as `dispatch` and open the same order.
+4. Use **Compliance Dispatch Console** to fill invoice and transport info.
+5. Dispatch order and show auto-generated compliance metadata:
+   - E-Way status and number
+   - invoice value and GST breakup
+   - filing health status
+
+### B. CRDT-Based Distributed Sync
+
+1. Explain stock now uses PN-counters (`P` and `N`) per SKU.
+2. Call `POST /api/inventory/crdt/merge` with node snapshots from an offline desktop.
+3. Repeat the same request to demonstrate idempotent merge (no double-apply).
+4. Open `GET /api/inventory/crdt/summary` to show converged quantity and node replication state.
+
+### C. Real-World Risk Intelligence
+
+1. Open Dashboard and show:
+   - stockout prediction
+   - delayed purchases
+   - reorder actions
+2. Open GST control tower section and show:
+   - blocked dispatch risk
+   - ITC mismatch alerts
+
+## 4) Key API Endpoints
+
+- `GET /api/dashboard/stats`
+- `GET /api/insights/risk-summary`
+- `GET /api/compliance/summary`
+- `GET /api/inventory/crdt/summary`
+- `POST /api/inventory/crdt/merge`
+
+## 5) Environment Variables to Highlight
+
+Backend:
+
+- `DATABASE_URL`
+- `JWT_SECRET`
+- `CORS_ORIGINS`
+- `EWAY_BILL_MODE`
+- `EWAY_BILL_THRESHOLD_INR`
+- `CRDT_NODE_ID`
+
+Frontend:
+
+- `VITE_API_BASE_URL`
+
+## 6) Optional Live Mode Notes
+
+- Keep `EWAY_BILL_MODE=SIMULATED` for stable judging demo.
+- Switch to `LIVE` only when valid provider endpoint/token are available.

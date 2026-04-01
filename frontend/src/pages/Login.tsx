@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { API_URL as API } from '../config/api';
 
 const Login = ({ setAuth }: { setAuth: (data: any) => void }) => {
   const [username, setUsername] = useState('');
@@ -14,7 +15,7 @@ const Login = ({ setAuth }: { setAuth: (data: any) => void }) => {
     setError('');
 
     try {
-      const res = await fetch('http://localhost:3001/api/login', {
+      const res = await fetch(`${API}/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })

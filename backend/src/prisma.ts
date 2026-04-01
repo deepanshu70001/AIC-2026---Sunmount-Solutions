@@ -1,12 +1,14 @@
 import { PrismaClient } from '@prisma/client';
-import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
-import path from 'path';
 
-// Prisma v7 requires a driver adapter
-const adapter = new PrismaBetterSqlite3({
-  url: 'file:' + path.resolve(__dirname, '..', 'dev.db')
-});
+declare global {
+  // eslint-disable-next-line no-var
+  var __prisma__: PrismaClient | undefined;
+}
 
-const prisma = new PrismaClient({ adapter });
+const prisma = global.__prisma__ ?? new PrismaClient();
+
+if (process.env.NODE_ENV !== 'production') {
+  global.__prisma__ = prisma;
+}
 
 export default prisma;
