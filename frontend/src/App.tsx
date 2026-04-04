@@ -8,6 +8,7 @@ import HistoryPage from './pages/HistoryPage';
 import SettingsPage from './pages/SettingsPage';
 import SalesPage from './pages/SalesPage';
 import Login from './pages/Login';
+import CrdtSyncPage from './pages/CrdtSyncPage';
 import AIChatWidget from './components/chat/AIChatWidget';
 
 function App() {
@@ -52,6 +53,7 @@ function App() {
         
         <Route path="/purchases" element={<PurchasesPage />} />
         <Route path="/manufacturing" element={<ManufacturingPage />} />
+        <Route path="/sync" element={<CrdtSyncPage />} />
         <Route path="/reports" element={<HistoryPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Routes>

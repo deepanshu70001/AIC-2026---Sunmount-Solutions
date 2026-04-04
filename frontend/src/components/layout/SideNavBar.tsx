@@ -62,6 +62,13 @@ const SideNavBar = () => {
           </NavLink>
         )}
 
+        {['SYSTEM_ADMIN', 'INVENTORY_MANAGER'].includes(role) && (
+          <NavLink to="/sync" className={navClass}>
+            <span className="material-symbols-outlined text-[20px]">cloud_sync</span>
+            <span>Distributed Sync</span>
+          </NavLink>
+        )}
+
         {['SYSTEM_ADMIN', 'SALES_EXECUTIVE', 'INVENTORY_MANAGER', 'PROCUREMENT_OFFICER', 'PRODUCTION_TECHNICIAN'].includes(role) && (
           <NavLink to="/reports" className={navClass}>
             <span className="material-symbols-outlined text-[20px]">history</span>
