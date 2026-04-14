@@ -10,6 +10,7 @@ import SalesPage from './pages/SalesPage';
 import Login from './pages/Login';
 import CrdtSyncPage from './pages/CrdtSyncPage';
 import AIChatWidget from './components/chat/AIChatWidget';
+import ErrorBoundary from './components/ErrorBoundary';
 import { ThemeProvider } from './context/ThemeContext';
 
 function App() {
@@ -34,36 +35,40 @@ function App() {
 
   if (!auth.token) {
     return (
-      <ThemeProvider>
-        <Router>
-          <Routes>
-            <Route path="/login" element={<Login setAuth={setAuth} />} />
-            <Route path="*" element={<Navigate to="/login" replace />} />
-          </Routes>
-        </Router>
-      </ThemeProvider>
+      <ErrorBoundary>
+        <ThemeProvider>
+          <Router>
+            <Routes>
+              <Route path="/login" element={<Login setAuth={setAuth} />} />
+              <Route path="*" element={<Navigate to="/login" replace />} />
+            </Routes>
+          </Router>
+        </ThemeProvider>
+      </ErrorBoundary>
     );
   }
 
   return (
-    <ThemeProvider>
-      <Router>
-      <Routes>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="/login" element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/inventory" element={<InventoryPage />} />
-        <Route path="/sales" element={<SalesPage />} />
-        
-        <Route path="/purchases" element={<PurchasesPage />} />
-        <Route path="/manufacturing" element={<ManufacturingPage />} />
-        <Route path="/sync" element={<CrdtSyncPage />} />
-        <Route path="/reports" element={<HistoryPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-      </Routes>
-      <AIChatWidget />
-    </Router>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <Router>
+          <Routes>
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/login" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/inventory" element={<InventoryPage />} />
+            <Route path="/sales" element={<SalesPage />} />
+            
+            <Route path="/purchases" element={<PurchasesPage />} />
+            <Route path="/manufacturing" element={<ManufacturingPage />} />
+            <Route path="/sync" element={<CrdtSyncPage />} />
+            <Route path="/reports" element={<HistoryPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+          </Routes>
+          <AIChatWidget />
+        </Router>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }
 

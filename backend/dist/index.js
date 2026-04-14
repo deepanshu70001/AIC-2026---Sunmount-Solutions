@@ -337,17 +337,24 @@ const corsOrigins = (process.env.CORS_ORIGINS || '')
     .split(',')
     .map(origin => origin.trim())
     .filter(Boolean);
-app.use((0, cors_1.default)(corsOrigins.length > 0
-    ? {
-        origin: (origin, callback) => {
-            if (!origin || corsOrigins.includes(origin)) {
-                callback(null, true);
-                return;
-            }
+const defaultAllowedOrigins = ['http://localhost:3000', 'http://localhost:5173'];
+const allowedOrigins = corsOrigins.length > 0 ? corsOrigins : defaultAllowedOrigins;
+app.use((0, cors_1.default)({
+    origin: (origin, callback) => {
+        if (!origin) {
+            callback(null, true);
+            return;
+        }
+        if (allowedOrigins.includes(origin)) {
+            callback(null, true);
+        }
+        else {
+            console.warn(`CORS rejected origin: ${origin}`);
             callback(new Error('Not allowed by CORS'));
         }
-    }
-    : undefined));
+    },
+    credentials: true
+}));
 app.use(express_1.default.json());
 const chat_1 = __importDefault(require("./chat"));
 app.get('/health', (_req, res) => {
@@ -356,13 +363,24 @@ app.get('/health', (_req, res) => {
 // ------------------------------
 // Auth Middleware
 // ------------------------------
+// Middleware: Authenticate JWT token
 const authenticate = (req, res, next) => {
-    const token = req.headers.authorization?.split(' ')[1];
-    if (!token)
-        return res.status(401).json({ error: 'Unauthorized' });
+    const authHeader = req.headers.authorization;
+    if (!authHeader || typeof authHeader !== 'string') {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+    }
+    const parts = authHeader.split(' ');
+    if (parts.length !== 2 || parts[0] !== 'Bearer') {
+        res.status(401).json({ error: 'Invalid authorization header' });
+        return;
+    }
+    const token = parts[1];
     jsonwebtoken_1.default.verify(token, SECRET_KEY, (err, user) => {
-        if (err)
-            return res.status(403).json({ error: 'Forbidden' });
+        if (err) {
+            res.status(403).json({ error: 'Forbidden' });
+            return;
+        }
         req.user = user;
         next();
     });
@@ -391,20 +409,28 @@ app.post('/api/login', async (req, res) => {
 // ------------------------------
 // RBAC Middleware & User Management
 // ------------------------------
+// Middleware: Require SYSTEM_ADMIN role
 const requireAdmin = (req, res, next) => {
-    if (req.user?.role !== 'SYSTEM_ADMIN') {
-        return res.status(403).json({ error: 'Restricted to SYSTEM_ADMIN' });
+    if (!req.user || req.user.role !== 'SYSTEM_ADMIN') {
+        res.status(403).json({ error: 'Restricted to SYSTEM_ADMIN' });
+        return;
     }
     next();
 };
+// Middleware: Require specific roles (SYSTEM_ADMIN grants all roles)
 const requireRoles = (roles) => {
     return (req, res, next) => {
-        if (!req.user || !req.user.role)
-            return res.status(401).json({ error: 'Unauthorized' });
-        if (req.user.role === 'SYSTEM_ADMIN')
-            return next();
+        if (!req.user || !req.user.role) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+        if (req.user.role === 'SYSTEM_ADMIN') {
+            next();
+            return;
+        }
         if (!roles.includes(req.user.role)) {
-            return res.status(403).json({ error: `Restricted to [${roles.join(', ')}]` });
+            res.status(403).json({ error: `Restricted to [${roles.join(', ')}]` });
+            return;
         }
         next();
     };
@@ -474,9 +500,10 @@ app.get('/api/parties/:id', authenticate, async (req, res) => {
     if (!party) {
         return res.status(404).json({ error: 'Party not found' });
     }
+    // Use exact match instead of contains to prevent query injection
     const activeOrderCount = await prisma_1.default.order.count({
         where: {
-            customer_supplier_id: { contains: party.id },
+            customer_supplier_id: party.id,
             status: { in: ['QUOTATION', 'PACKING', 'PAID', 'UNPAID'] }
         }
     });

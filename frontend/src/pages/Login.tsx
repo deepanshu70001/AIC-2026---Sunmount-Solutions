@@ -15,24 +15,59 @@ const Login = ({ setAuth }: { setAuth: (data: any) => void }) => {
     setError('');
 
     try {
+      // Validate input
+      if (!username.trim()) {
+        setError('Username is required');
+        setLoading(false);
+        return;
+      }
+      if (!password) {
+        setError('Password is required');
+        setLoading(false);
+        return;
+      }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
       const res = await fetch(`${API}/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ username: username.trim(), password }),
+        signal: controller.signal
       });
+
+      clearTimeout(timeout);
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || `Login failed (${res.status})`);
+        setLoading(false);
+        return;
+      }
+
       const data = await res.json();
       
-      if (res.ok) {
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('role', data.role);
-        localStorage.setItem('username', data.username);
-        setAuth({ token: data.token, role: data.role, username: data.username });
-        navigate('/dashboard');
-      } else {
-        setError(data.error);
+      if (!data.token) {
+        setError('No authentication token received');
+        setLoading(false);
+        return;
       }
-    } catch (err) {
-      setError('Connection failed. Please ensure the backend is running.');
+
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('role', data.role || 'USER');
+      localStorage.setItem('username', data.username || username);
+      setAuth({ token: data.token, role: data.role, username: data.username });
+      navigate('/dashboard');
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        setError('Connection timeout. Please check if the backend is running.');
+      } else if (err instanceof TypeError) {
+        setError('Network error. Please ensure the backend URL is correct.');
+      } else {
+        setError(err.message || 'Connection failed. Please ensure the backend is running.');
+      }
+      console.error('Login error:', err);
     } finally {
       setLoading(false);
     }

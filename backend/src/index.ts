@@ -408,19 +408,24 @@ const corsOrigins = (process.env.CORS_ORIGINS || '')
   .map(origin => origin.trim())
   .filter(Boolean);
 
-app.use(cors(
-  corsOrigins.length > 0
-    ? {
-        origin: (origin, callback) => {
-          if (!origin || corsOrigins.includes(origin)) {
-            callback(null, true);
-            return;
-          }
-          callback(new Error('Not allowed by CORS'));
-        }
-      }
-    : undefined
-));
+const defaultAllowedOrigins = ['http://localhost:3000', 'http://localhost:5173'];
+const allowedOrigins = corsOrigins.length > 0 ? corsOrigins : defaultAllowedOrigins;
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.warn(`CORS rejected origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
 app.use(express.json());
 
 import chatRouter from './chat';
@@ -431,12 +436,26 @@ app.get('/health', (_req, res) => {
 // ------------------------------
 // Auth Middleware
 // ------------------------------
-const authenticate = (req: any, res: any, next: any) => {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+// Middleware: Authenticate JWT token
+const authenticate = (req: any, res: any, next: any): void => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || typeof authHeader !== 'string') {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
 
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') {
+    res.status(401).json({ error: 'Invalid authorization header' });
+    return;
+  }
+
+  const token = parts[1];
   jwt.verify(token, SECRET_KEY, (err: any, user: any) => {
-    if (err) return res.status(403).json({ error: 'Forbidden' });
+    if (err) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
     req.user = user;
     next();
   });
@@ -467,19 +486,29 @@ app.post('/api/login', async (req, res) => {
 // ------------------------------
 // RBAC Middleware & User Management
 // ------------------------------
-const requireAdmin = (req: any, res: any, next: any) => {
-  if (req.user?.role !== 'SYSTEM_ADMIN') {
-    return res.status(403).json({ error: 'Restricted to SYSTEM_ADMIN' });
+// Middleware: Require SYSTEM_ADMIN role
+const requireAdmin = (req: any, res: any, next: any): void => {
+  if (!req.user || req.user.role !== 'SYSTEM_ADMIN') {
+    res.status(403).json({ error: 'Restricted to SYSTEM_ADMIN' });
+    return;
   }
   next();
 };
 
+// Middleware: Require specific roles (SYSTEM_ADMIN grants all roles)
 const requireRoles = (roles: string[]) => {
-  return (req: any, res: any, next: any) => {
-    if (!req.user || !req.user.role) return res.status(401).json({ error: 'Unauthorized' });
-    if (req.user.role === 'SYSTEM_ADMIN') return next();
+  return (req: any, res: any, next: any): void => {
+    if (!req.user || !req.user.role) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    if (req.user.role === 'SYSTEM_ADMIN') {
+      next();
+      return;
+    }
     if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ error: `Restricted to [${roles.join(', ')}]` });
+      res.status(403).json({ error: `Restricted to [${roles.join(', ')}]` });
+      return;
     }
     next();
   };
@@ -552,9 +581,10 @@ app.get('/api/parties/:id', authenticate, async (req: any, res: any) => {
     return res.status(404).json({ error: 'Party not found' });
   }
 
+  // Use exact match instead of contains to prevent query injection
   const activeOrderCount = await prisma.order.count({
     where: {
-      customer_supplier_id: { contains: party.id },
+      customer_supplier_id: party.id,
       status: { in: ['QUOTATION', 'PACKING', 'PAID', 'UNPAID'] }
     }
   });

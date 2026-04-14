@@ -3,7 +3,7 @@ services:
     name: inventory-pro-api
     runtime: node
     rootDir: backend
-    buildCommand: npm ci && npm run prisma:generate && npm run build
+    buildCommand: npm ci && npm run prisma:generate && npm run prisma:push && npm run build
     startCommand: npm run start
     healthCheckPath: /health
     envVars:
