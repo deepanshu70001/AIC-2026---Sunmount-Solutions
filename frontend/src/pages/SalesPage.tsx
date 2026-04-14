@@ -93,6 +93,26 @@ export default function SalesPage() {
   const [isNewForm, setIsNewForm] = useState(false);
   const [pageError, setPageError] = useState('');
 
+  const downloadPdf = async (orderId: string) => {
+    try {
+      const response = await fetch(`${API}/orders/${orderId}/pdf`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+      if (!response.ok) throw new Error('Failed to download PDF');
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Invoice_${orderId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) {
+      console.error(e);
+      setPageError('Failed to download PDF invoice.');
+    }
+  };
+
+
   const [customerId, setCustomerId] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [notes, setNotes] = useState('');
@@ -289,7 +309,6 @@ export default function SalesPage() {
     }
   };
 
-  const orderItemCount = (order: SalesOrder) => order.products.reduce((acc, line) => acc + Number(line.quantity || 0), 0);
   const orderTotal = (order: SalesOrder) => order.products.reduce((acc, line) => acc + Number(line.price || 0) * Number(line.quantity || 0), 0);
 
   const currentRole = localStorage.getItem('role');
@@ -313,68 +332,64 @@ export default function SalesPage() {
       <div className="flex-1 ml-64 flex flex-col h-screen overflow-hidden">
         <TopNavBar />
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 bg-[#f8f9fa] dark:bg-slate-900 flex flex-col lg:flex-row gap-6">
-          <div className="w-full lg:w-1/3 flex flex-col gap-4">
-            <div className="flex justify-between items-center mb-2">
-              <h2 className="text-xl font-black text-primary">Sales Operations</h2>
-              {['SYSTEM_ADMIN', 'SALES_EXECUTIVE'].includes(currentRole || '') && (
-                <button
-                  onClick={() => {
+        <main className="flex-1 pt-24 flex overflow-hidden bg-surface">
+          {/* Left: Sales List */}
+          <div className="w-1/3 border-r border-slate-200 bg-surface-container-lowest flex flex-col h-full overflow-hidden shadow-sm">
+            <div className="p-4 border-b border-slate-200 bg-white/50 backdrop-blur-sm z-10">
+              <div className="flex justify-between items-center mb-4">
+                <div>
+                  <h2 className="text-xl font-black text-primary tracking-tight">Sales Operations</h2>
+                  <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mt-0.5">Billings & Invoices</p>
+                </div>
+                {['SYSTEM_ADMIN', 'SALES_EXECUTIVE'].includes(currentRole || '') && (
+                  <button onClick={() => {
                     setIsNewForm(true);
                     setSelectedOrder(null);
                     resetCreateForm();
                     setPageError('');
                   }}
-                  className="bg-primary text-white p-2 rounded-lg hover:bg-primary-fixed transition-colors shadow-md"
-                >
-                  <span className="material-symbols-outlined text-[20px]">add</span>
-                </button>
-              )}
+                    className="bg-primary text-white p-2 rounded-lg hover:bg-primary-fixed transition-colors shadow-md shadow-primary/20">
+                    <span className="material-symbols-outlined text-[20px]">add</span>
+                  </button>
+                )}
+              </div>
             </div>
-
-            <div className="bg-surface-container-lowest flex-1 rounded-2xl material-3d-shadow overflow-y-auto border border-slate-200">
+            
+            <div className="flex-1 overflow-y-auto p-2 space-y-2 bg-slate-50/50">
               {orders.map(order => (
-                <div
-                  key={order.order_id}
-                  onClick={() => {
+                <div key={order.order_id} onClick={() => {
                     setSelectedOrder(order);
                     setDispatchDefaultsFromOrder(order);
                     setIsNewForm(false);
                   }}
-                  className={`p-4 border-b border-slate-100 cursor-pointer transition-colors ${selectedOrder?.order_id === order.order_id ? 'bg-primary/5 border-l-4 border-l-primary' : 'hover:bg-slate-50'}`}
-                >
+                  className={`p-4 rounded-xl border border-transparent cursor-pointer transition-all ${selectedOrder?.order_id === order.order_id ? 'bg-white shadow-md border-slate-200 scale-[1.02] z-10' : 'hover:bg-white/60 text-on-surface-variant'}`}>
                   <div className="flex justify-between items-start mb-2">
-                    <span className="font-bold text-sm text-primary">{order.customer_supplier_id || 'Unknown Customer'}</span>
+                    <span className={`font-bold text-sm ${selectedOrder?.order_id === order.order_id ? 'text-primary' : 'text-slate-700'}`}>{order.customer_supplier_id || 'Unknown Customer'}</span>
                     <span className={`text-[9px] font-black tracking-wider uppercase px-2 py-1 rounded-full ${
                       order.status === 'QUOTATION' ? 'bg-blue-100 text-blue-700' :
                       order.status === 'PACKING' ? 'bg-orange-100 text-orange-700' :
+                      order.status === 'DISPATCH' ? 'bg-purple-100 text-purple-700' :
                       'bg-green-100 text-green-700'
-                    }`}>
-                      {order.status}
-                    </span>
+                    }`}>{order.status}</span>
                   </div>
-                  <div className="text-xs text-slate-500 font-mono mb-2">{order.order_id.substring(0, 8)}...</div>
-                  <div className="text-sm font-bold text-on-surface-variant flex items-center justify-between mt-3">
-                    <span className="flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[14px]">inventory_2</span>
-                      {orderItemCount(order)} items
-                    </span>
-                    <span>{currency(orderTotal(order))}</span>
-                  </div>
-                  {order.status === 'DISPATCH' && (
-                    <div className="mt-2 text-[10px] font-black uppercase tracking-wider text-green-700 bg-green-50 border border-green-100 rounded-md px-2 py-1 inline-block">
-                      E-Way {order.eway_bill_status || 'PENDING'}
+                  <div className="flex justify-between items-center text-[11px] text-slate-500 font-medium">
+                    <div className="flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[14px]">event</span>
+                      {new Date(order.date).toLocaleDateString()}
                     </div>
-                  )}
+                    <div className="flex items-center gap-1.5 font-bold text-slate-700">
+                      <span className="material-symbols-outlined text-[14px]">receipt_long</span>
+                      ₹{orderTotal(order).toLocaleString('en-IN')}
+                    </div>
+                  </div>
                 </div>
               ))}
-              {orders.length === 0 && (
-                <div className="p-8 text-center text-slate-400 font-medium">No sales orders found.</div>
-              )}
+              {orders.length === 0 && <div className="p-8 text-center text-slate-400 font-medium mt-10">No sales orders found.</div>}
             </div>
           </div>
 
-          <div className="w-full lg:w-2/3 bg-surface-container-lowest rounded-2xl material-3d-shadow p-6 border border-slate-200 overflow-y-auto">
+          {/* Right Panel: Detail / Form */}
+          <div className="flex-1 bg-white h-full overflow-y-auto p-8 relative">
             {pageError && (
               <div className="mb-4 rounded-xl border border-red-100 bg-red-50/70 p-3 text-sm text-red-700 font-semibold">
                 {pageError}
@@ -516,6 +531,13 @@ export default function SalesPage() {
                       {selectedOrder.status}
                     </span>
                     <p className="text-2xl font-black text-primary mt-4">{currency(orderTotal(selectedOrder))}</p>
+                    <button 
+                      onClick={() => downloadPdf(selectedOrder.order_id)}
+                      className="mt-2 flex items-center justify-end gap-1 w-full text-blue-600 hover:text-blue-800 text-sm font-bold"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">picture_as_pdf</span>
+                      Download Bill
+                    </button>
                   </div>
                 </div>
 
@@ -670,9 +692,12 @@ export default function SalesPage() {
                 </div>
               </div>
             ) : (
-              <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                <span className="material-symbols-outlined text-[64px] mb-4 opacity-20">point_of_sale</span>
-                <p className="font-medium">Select an order or create a new quotation</p>
+              <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60">
+                <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mb-4">
+                  <span className="material-symbols-outlined text-6xl">point_of_sale</span>
+                </div>
+                <p className="text-lg font-bold">Select a sales order</p>
+                <p className="text-sm">Click an item from the list to view full details and manage billing</p>
               </div>
             )}
           </div>

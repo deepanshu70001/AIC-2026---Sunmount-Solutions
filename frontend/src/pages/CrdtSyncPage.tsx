@@ -111,7 +111,7 @@ export default function CrdtSyncPage() {
       <SideNavBar />
       <div className="flex-1 ml-64 flex flex-col h-screen overflow-hidden">
         <TopNavBar />
-        <main className="flex-1 pt-16 flex overflow-hidden">
+        <main className="flex-1 pt-24 flex overflow-hidden">
           {/* Main CRDT Tracker */}
           <div className="w-2/3 flex flex-col h-full bg-background overflow-y-auto">
             <div className="p-8 pb-4">
@@ -144,9 +144,11 @@ export default function CrdtSyncPage() {
                       <p className="text-2xl font-black text-green-600">{summary.convergedCount}</p>
                       <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold">In Sync</p>
                     </div>
-                    <div className="bg-surface-container-lowest p-5 rounded-2xl material-3d-shadow border border-slate-100">
+                    <div className="bg-surface-container-lowest p-5 rounded-2xl material-3d-shadow border border-slate-100 group hover:border-orange-200 transition-colors">
                       <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Drifting</p>
-                      <p className={`text-2xl font-black ${summary.driftCount > 0 ? 'text-orange-500' : 'text-slate-400'}`}>{summary.driftCount}</p>
+                      <p className={`text-2xl font-black ${summary.driftCount > 0 ? 'text-orange-500' : 'text-slate-400'}`}>
+                        {summary.driftCount}
+                      </p>
                       <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold">Needs Merge</p>
                     </div>
                   </div>

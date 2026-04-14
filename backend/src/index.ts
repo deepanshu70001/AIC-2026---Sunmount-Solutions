@@ -17,6 +17,8 @@ import {
   normalizeNodeId,
   serializeCounter
 } from './crdt';
+import { generateOrderPdf, generateInventoryPdf } from './pdf';
+import { generateForecasts } from './ml';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -422,7 +424,6 @@ app.use(cors(
 app.use(express.json());
 
 import chatRouter from './chat';
-app.use('/api/chat', chatRouter);
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
@@ -440,6 +441,9 @@ const authenticate = (req: any, res: any, next: any) => {
     next();
   });
 };
+
+// Mount chat router with authentication
+app.use('/api/chat', authenticate, chatRouter);
 
 // ------------------------------
 // Auth Endpoints
@@ -482,10 +486,14 @@ const requireRoles = (roles: string[]) => {
 };
 
 app.get('/api/users', authenticate, requireAdmin, async (req, res) => {
-  const users = await prisma.user.findMany({ 
-    select: { id: true, username: true, role: true, created_at: true } 
-  });
-  res.json(users);
+  try {
+    const users = await prisma.user.findMany({ 
+      select: { id: true, username: true, role: true, created_at: true } 
+    });
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load users' });
+  }
 });
 
 app.post('/api/users', authenticate, requireAdmin, async (req, res) => {
@@ -502,11 +510,15 @@ app.post('/api/users', authenticate, requireAdmin, async (req, res) => {
 });
 
 app.delete('/api/users/:id', authenticate, requireAdmin, async (req: any, res: any) => {
-  if (req.params.id === req.user.id) {
-    return res.status(400).json({ error: 'Cannot delete yourself' });
+  try {
+    if (req.params.id === req.user.id) {
+      return res.status(400).json({ error: 'Cannot delete yourself' });
+    }
+    await prisma.user.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete user' });
   }
-  await prisma.user.delete({ where: { id: req.params.id } });
-  res.json({ success: true });
 });
 
 app.put('/api/users/:id/role', authenticate, requireAdmin, async (req: any, res: any) => {
@@ -591,8 +603,12 @@ app.post('/api/products', authenticate, requireRoles(['INVENTORY_MANAGER']), asy
 });
 
 app.delete('/api/products/:id', authenticate, requireRoles(['INVENTORY_MANAGER']), async (req: any, res: any) => {
-  await prisma.product.delete({ where: { product_code: req.params.id } });
-  res.json({ success: true });
+  try {
+    await prisma.product.delete({ where: { product_code: req.params.id } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete product' });
+  }
 });
 
 // ------------------------------
@@ -778,6 +794,59 @@ app.put('/api/orders/:id', authenticate, async (req: any, res: any) => {
     const message = error?.message || 'Failed to update order';
     const statusCode = getRequestErrorStatus(error, 400);
     res.status(statusCode).json({ error: message });
+  }
+});
+
+// ------------------------------
+// NEW PDF & ML ROUTES
+// ------------------------------
+
+app.get('/api/orders/:id/pdf', authenticate, async (req: any, res: any) => {
+  try {
+    const order = await prisma.order.findUnique({ where: { order_id: req.params.id } });
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    
+    const dbProducts = await prisma.product.findMany();
+    const doc = generateOrderPdf(order, dbProducts);
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=Invoice_${order.order_id}.pdf`);
+    
+    doc.pipe(res);
+    doc.end();
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to generate PDF' });
+  }
+});
+
+app.get('/api/ml/forecasts', authenticate, async (req: any, res: any) => {
+  try {
+    const orders = await prisma.order.findMany();
+    const products = await prisma.product.findMany();
+    const manufacturing = await prisma.manufacturing.findMany();
+    
+    const forecasts = generateForecasts(orders, products, manufacturing);
+    res.json(forecasts);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to generate ML forecasts' });
+  }
+});
+
+app.get('/api/inventory/report/pdf', authenticate, async (req: any, res: any) => {
+  try {
+    const products = await prisma.product.findMany({ orderBy: { product_code: 'asc' } });
+    const doc = generateInventoryPdf(products);
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=Inventory_Report_${new Date().toISOString().slice(0,10)}.pdf`);
+    
+    doc.pipe(res);
+    doc.end();
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to generate inventory PDF' });
   }
 });
 

@@ -107,7 +107,7 @@ const SettingsPage = () => {
       <SideNavBar />
       <div className="flex-1 ml-64 flex flex-col h-screen overflow-hidden">
         <TopNavBar />
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 bg-[#f8f9fa] dark:bg-slate-900">
+        <main className="flex-1 overflow-y-auto pt-24 p-4 md:p-8 bg-[#f8f9fa] dark:bg-slate-900">
           <div className="max-w-6xl mx-auto space-y-6">
             
             <div className="flex justify-between items-center mb-8">

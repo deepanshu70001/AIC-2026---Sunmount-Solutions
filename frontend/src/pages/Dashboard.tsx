@@ -80,21 +80,24 @@ const Dashboard = () => {
   const [riskSummary, setRiskSummary] = useState<RiskSummary | null>(null);
   const [complianceSummary, setComplianceSummary] = useState<ComplianceSummary | null>(null);
   const [crdtSummary, setCrdtSummary] = useState<CrdtSummary | null>(null);
+  const [forecasts, setForecasts] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [statsRes, riskRes, complianceRes, crdtRes] = await Promise.all([
+        const [statsRes, riskRes, complianceRes, crdtRes, forecastRes] = await Promise.all([
           fetch(`${API}/dashboard/stats`, { headers: authHeaders() }),
           fetch(`${API}/insights/risk-summary`, { headers: authHeaders() }),
           fetch(`${API}/compliance/summary`, { headers: authHeaders() }),
           fetch(`${API}/inventory/crdt/summary`, { headers: authHeaders() }),
+          fetch(`${API}/ml/forecasts`, { headers: authHeaders() }),
         ]);
         if (statsRes.ok) setStats(await statsRes.json());
         if (riskRes.ok) setRiskSummary(await riskRes.json());
         if (complianceRes.ok) setComplianceSummary(await complianceRes.json());
         if (crdtRes.ok) setCrdtSummary(await crdtRes.json());
+        if (forecastRes.ok) setForecasts(await forecastRes.json());
       } catch {} finally { setLoading(false); }
     };
     load();
@@ -127,7 +130,7 @@ const Dashboard = () => {
     <div className="bg-surface text-on-surface min-h-screen">
       <SideNavBar />
       <TopNavBar />
-      <main className="ml-64 pt-24 px-8 pb-12">
+      <main className="ml-0 lg:ml-64 pt-20 lg:pt-24 px-4 lg:px-8 pb-12 transition-all duration-300">
         <div className="mb-8 flex justify-between items-end">
           <div>
             <h2 className="text-3xl font-extrabold tracking-tight text-primary">Warehouse Overview</h2>
@@ -404,6 +407,86 @@ const Dashboard = () => {
             </div>
           ) : (
             <p className="text-sm text-slate-500">Loading CRDT replication summary...</p>
+          )}
+        </div>
+
+        {/* ML Forecasts Card */}
+        <div className="mb-8 rounded-3xl bg-white border border-slate-200 p-6 md:p-8 material-3d-shadow">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center text-purple-700">
+                <span className="material-symbols-outlined text-[28px]">insights</span>
+              </div>
+              <div>
+                <h3 className="text-xl font-black text-primary">AI Predictive Analytics</h3>
+                <p className="text-sm font-medium text-slate-500">Machine learning models tracking anomalies and forecasting</p>
+              </div>
+            </div>
+            <span className="text-[11px] uppercase tracking-wider font-black px-3 py-1 rounded-full bg-purple-100 text-purple-700">
+              ML Pipeline
+            </span>
+          </div>
+
+          {forecasts ? (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Sales Forecast */}
+              <div className="rounded-xl border border-purple-100 bg-purple-50/50 p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="material-symbols-outlined text-purple-600 text-lg">trending_up</span>
+                  <h4 className="font-black text-purple-900 uppercase tracking-widest text-xs">Revenue Forecast (7 Days)</h4>
+                </div>
+                {forecasts.sales_forecast.predictions_next_7_days.map((p: any, i: number) => (
+                  <div key={i} className="flex justify-between items-center py-2 border-b border-purple-100/50 last:border-0">
+                    <span className="text-sm font-bold text-slate-600">{p.day}</span>
+                    <span className="text-sm font-black text-primary">{formatCurrency(p.expected_revenue)}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Manufacturing Bottleneck */}
+              <div className={`rounded-xl border p-5 ${forecasts.manufacturing_analytics.efficiency_rating === 'POOR' ? 'border-red-200 bg-red-50' : 'border-emerald-100 bg-emerald-50'}`}>
+                <div className="flex items-center gap-2 mb-4">
+                  <span className={`material-symbols-outlined text-lg ${forecasts.manufacturing_analytics.efficiency_rating === 'POOR' ? 'text-red-600' : 'text-emerald-600'}`}>factory</span>
+                  <h4 className={`font-black uppercase tracking-widest text-xs ${forecasts.manufacturing_analytics.efficiency_rating === 'POOR' ? 'text-red-900' : 'text-emerald-900'}`}>Factory Output</h4>
+                </div>
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-xs text-slate-500 uppercase tracking-widest font-bold">Efficiency Score</p>
+                    <p className="text-2xl font-black mt-1">{forecasts.manufacturing_analytics.efficiency_rating}</p>
+                  </div>
+                  {forecasts.manufacturing_analytics.bottleneck_warning ? (
+                    <div className="bg-white/60 p-3 rounded-lg border border-red-200">
+                      <p className="text-xs font-bold text-red-700">{forecasts.manufacturing_analytics.bottleneck_warning}</p>
+                    </div>
+                  ) : <p className="text-sm font-bold text-emerald-700">No major bottlenecks detected.</p>}
+                  <p className="text-xs text-slate-500">Based on {forecasts.manufacturing_analytics.data_points} ML data points.</p>
+                </div>
+              </div>
+
+              {/* Stockout Risk */}
+              <div className="rounded-xl border border-orange-200 bg-orange-50/50 p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="material-symbols-outlined text-orange-600 text-lg">production_quantity_limits</span>
+                  <h4 className="font-black text-orange-900 uppercase tracking-widest text-xs">High Stockout Risk</h4>
+                </div>
+                {forecasts.inventory_risk.map((r: any, i: number) => (
+                  <div key={i} className="mb-3 last:mb-0 bg-white/60 p-2 rounded border border-orange-100 flex justify-between">
+                    <div>
+                      <p className="text-xs font-black text-primary">{r.product_code}</p>
+                      <p className="text-[10px] uppercase font-bold text-slate-500">{r.current_stock} currently in stock</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs font-black text-red-600">{r.days_until_stockout.toFixed(0)} days left</p>
+                      <p className="text-[10px] text-slate-500 font-bold">{r.daily_velocity} sold/day</p>
+                    </div>
+                  </div>
+                ))}
+                {forecasts.inventory_risk.length === 0 && <p className="text-sm text-slate-500">No immediate stockout risks predicted.</p>}
+              </div>
+
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">Generating AI forecasts...</p>
           )}
         </div>
       </main>

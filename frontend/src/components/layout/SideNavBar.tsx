@@ -1,6 +1,8 @@
 import { NavLink } from 'react-router-dom';
+import { useTheme } from '../../context/ThemeContext';
 
 const SideNavBar = () => {
+  const { isSidebarOpen, closeSidebar } = useTheme();
   const role = localStorage.getItem('role') || 'SYSTEM_ADMIN';
 
   const handleLogout = () => {
@@ -16,7 +18,16 @@ const SideNavBar = () => {
     }`;
 
   return (
-    <aside className="fixed left-0 top-0 h-screen w-64 z-40 bg-[#f3f4f5] dark:bg-slate-950 flex flex-col p-4 gap-y-2 shadow-[4px_0_24px_-12px_rgba(0,0,0,0.1)] overflow-y-auto">
+    <>
+      {/* Mobile Backdrop Overlay */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 z-40 bg-black/50 lg:hidden backdrop-blur-sm transition-opacity"
+          onClick={closeSidebar}
+        />
+      )}
+      <aside className={`fixed left-0 top-0 h-screen w-64 z-50 bg-[#f3f4f5] dark:bg-slate-950 flex flex-col p-4 gap-y-2 shadow-[4px_0_24px_-12px_rgba(0,0,0,0.1)] overflow-y-auto transition-transform duration-300 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+
       <div className="flex items-center gap-3 px-3 py-6 mb-4">
         <div className="w-10 h-10 rounded-lg bg-primary-container flex items-center justify-center text-white">
           <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>inventory_2</span>
@@ -94,6 +105,7 @@ const SideNavBar = () => {
         </button>
       </div>
     </aside>
+    </>
   );
 };
 

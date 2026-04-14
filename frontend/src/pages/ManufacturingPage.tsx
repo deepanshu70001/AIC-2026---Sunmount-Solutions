@@ -62,30 +62,42 @@ export default function ManufacturingPage() {
       <SideNavBar />
       <div className="flex-1 ml-64 flex flex-col h-screen overflow-hidden">
         <TopNavBar />
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 bg-[#f8f9fa] flex flex-col lg:flex-row gap-6">
+        <main className="flex-1 pt-24 flex overflow-hidden bg-surface">
           {/* Left: Batch List */}
-          <div className="w-full lg:w-1/3 flex flex-col gap-4">
-            <div className="flex justify-between items-center mb-2">
-              <h2 className="text-xl font-black text-primary">Manufacturing WIP</h2>
-              <button onClick={() => { setShowForm(true); setSelected(null); }}
-                className="bg-primary text-white p-2 rounded-lg hover:bg-primary-fixed transition-colors shadow-md">
-                <span className="material-symbols-outlined text-[20px]">add</span>
-              </button>
+          <div className="w-1/3 border-r border-slate-200 bg-surface-container-lowest flex flex-col h-full overflow-hidden shadow-sm">
+            <div className="p-4 border-b border-slate-200 bg-white/50 backdrop-blur-sm z-10">
+              <div className="flex justify-between items-center mb-4">
+                <div>
+                  <h2 className="text-xl font-black text-primary tracking-tight">Manufacturing WIP</h2>
+                  <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mt-0.5">Production Pipeline</p>
+                </div>
+                <button onClick={() => { setShowForm(true); setSelected(null); }}
+                  className="bg-primary text-white p-2 rounded-lg hover:bg-primary-fixed transition-colors shadow-md shadow-primary/20">
+                  <span className="material-symbols-outlined text-[20px]">add</span>
+                </button>
+              </div>
             </div>
-            <div className="bg-surface-container-lowest flex-1 rounded-2xl material-3d-shadow overflow-y-auto border border-slate-200">
+            
+            <div className="flex-1 overflow-y-auto p-2 space-y-2 bg-slate-50/50">
               {batches.map(b => (
                 <div key={b.batch_number} onClick={() => { setSelected(b); setShowForm(false); }}
-                  className={`p-4 border-b border-slate-100 cursor-pointer transition-colors ${selected?.batch_number === b.batch_number ? 'bg-primary/5 border-l-4 border-l-primary' : 'hover:bg-slate-50'}`}>
+                  className={`p-4 rounded-xl border border-transparent cursor-pointer transition-all ${selected?.batch_number === b.batch_number ? 'bg-white shadow-md border-slate-200 scale-[1.02] z-10' : 'hover:bg-white/60 text-on-surface-variant'}`}>
                   <div className="flex justify-between items-start mb-2">
-                    <span className="font-bold text-sm text-primary">Batch {b.batch_number}</span>
+                    <span className={`font-bold text-sm ${selected?.batch_number === b.batch_number ? 'text-primary' : 'text-slate-700'}`}>Batch {b.batch_number}</span>
                     <span className={`text-[9px] font-black tracking-wider uppercase px-2 py-1 rounded-full ${
                       b.status === 'WIP' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'
                     }`}>{b.status}</span>
                   </div>
-                  <div className="text-xs text-slate-500">{new Date(b.start_date).toLocaleDateString()}</div>
-                  <div className="flex gap-4 mt-2 text-xs text-on-surface-variant">
-                    <span className="flex items-center gap-1"><span className="material-symbols-outlined text-[12px]">input</span>{b.raw_materials.length} inputs</span>
-                    <span className="flex items-center gap-1"><span className="material-symbols-outlined text-[12px]">output</span>{b.output.length} outputs</span>
+                  <div className="flex justify-between items-center text-[11px] text-slate-500 font-medium">
+                    <div className="flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[14px]">calendar_today</span>
+                      {new Date(b.start_date).toLocaleDateString()}
+                    </div>
+                    <div className="flex items-center gap-4">
+                       <span className="flex items-center gap-1" title="Lead Time"><span className="material-symbols-outlined text-[13px]">timer</span>{Math.floor((new Date(b.status === 'COMPLETED' ? b.end_date : new Date()).getTime() - new Date(b.start_date).getTime()) / (1000 * 60 * 60 * 24))}d</span>
+                       <span className="flex items-center gap-1"><span className="material-symbols-outlined text-[13px]">input</span>{b.raw_materials.length}</span>
+                       <span className="flex items-center gap-1"><span className="material-symbols-outlined text-[13px]">output</span>{b.output.length}</span>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -93,8 +105,8 @@ export default function ManufacturingPage() {
             </div>
           </div>
 
-          {/* Right Panel */}
-          <div className="w-full lg:w-2/3 bg-surface-container-lowest rounded-2xl material-3d-shadow p-6 border border-slate-200 overflow-y-auto">
+          {/* Right Panel: Detail / Form */}
+          <div className="flex-1 bg-white h-full overflow-y-auto p-8 relative">
             {showForm ? (
               <form onSubmit={handleCreate} className="flex flex-col gap-6">
                 <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
@@ -205,9 +217,12 @@ export default function ManufacturingPage() {
                 )}
               </div>
             ) : (
-              <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                <span className="material-symbols-outlined text-[64px] mb-4 opacity-20">factory</span>
-                <p className="font-medium">Select a batch or start new production</p>
+              <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60">
+                <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mb-4">
+                  <span className="material-symbols-outlined text-6xl">factory</span>
+                </div>
+                <p className="text-lg font-bold">Select a Batch</p>
+                <p className="text-sm">Click a production batch from the list to view its manifest</p>
               </div>
             )}
           </div>

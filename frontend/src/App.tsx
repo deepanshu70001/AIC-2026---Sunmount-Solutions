@@ -10,6 +10,7 @@ import SalesPage from './pages/SalesPage';
 import Login from './pages/Login';
 import CrdtSyncPage from './pages/CrdtSyncPage';
 import AIChatWidget from './components/chat/AIChatWidget';
+import { ThemeProvider } from './context/ThemeContext';
 
 function App() {
   const [auth, setAuth] = useState<{ token: string | null; role: string | null; username: string | null }>({
@@ -33,17 +34,20 @@ function App() {
 
   if (!auth.token) {
     return (
-      <Router>
-        <Routes>
-          <Route path="/login" element={<Login setAuth={setAuth} />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
-      </Router>
+      <ThemeProvider>
+        <Router>
+          <Routes>
+            <Route path="/login" element={<Login setAuth={setAuth} />} />
+            <Route path="*" element={<Navigate to="/login" replace />} />
+          </Routes>
+        </Router>
+      </ThemeProvider>
     );
   }
 
   return (
-    <Router>
+    <ThemeProvider>
+      <Router>
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/login" element={<Navigate to="/dashboard" replace />} />
@@ -59,6 +63,7 @@ function App() {
       </Routes>
       <AIChatWidget />
     </Router>
+    </ThemeProvider>
   );
 }
 

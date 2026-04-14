@@ -50,6 +50,24 @@ const InventoryPage = () => {
 
   useEffect(() => { fetchProducts(); }, []);
 
+  const downloadReport = async () => {
+    try {
+      const response = await fetch(`${API}/inventory/report/pdf`, { headers: authHeaders() });
+      if (!response.ok) throw new Error('Failed to download report');
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Inventory_Report_${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) {
+      console.error(e);
+      alert('Failed to download inventory report.');
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     const payload = {
@@ -96,19 +114,25 @@ const InventoryPage = () => {
   return (
     <div className="bg-surface text-on-surface min-h-screen flex">
       <SideNavBar />
-      <div className="flex-1 ml-64 flex flex-col h-screen overflow-hidden">
+      <div className="flex-1 flex flex-col h-screen overflow-hidden">
         <TopNavBar />
-        <main className="flex-1 pt-16 flex overflow-hidden">
+        <main className="ml-0 lg:ml-64 pt-16 lg:pt-24 flex flex-col lg:flex-row h-screen overflow-hidden bg-surface transition-all duration-300">
           {/* Master List */}
-          <div className="w-1/3 border-r border-slate-200 bg-surface-container-lowest flex flex-col h-full overflow-hidden">
+          <div className="w-full lg:w-1/3 h-[45vh] lg:h-full border-b lg:border-r border-slate-200 bg-surface-container-lowest flex flex-col overflow-hidden">
             <div className="p-4 border-b border-slate-200">
               <div className="flex justify-between items-center mb-3">
                 <h2 className="text-xl font-bold text-primary">Inventory</h2>
                 {['SYSTEM_ADMIN', 'INVENTORY_MANAGER'].includes(currentRole || '') && (
-                  <button onClick={() => { setShowForm(true); setIsEditing(false); setFormData({ product_code: '', name: '', description: '', hsn_code: '', gst_rate: 18, weight: 0, price: 0, quantity: 0 }); }}
-                    className="bg-primary text-white p-2 rounded-lg hover:bg-primary-fixed transition-colors shadow-md">
-                    <span className="material-symbols-outlined text-[20px]">add</span>
-                  </button>
+                  <div className="flex gap-2">
+                    <button onClick={downloadReport} title="Download Inventory Report"
+                      className="bg-white text-primary border border-primary p-2 rounded-lg hover:bg-primary/5 transition-colors shadow-sm">
+                      <span className="material-symbols-outlined text-[20px]">picture_as_pdf</span>
+                    </button>
+                    <button onClick={() => { setShowForm(true); setIsEditing(false); setFormData({ product_code: '', name: '', description: '', hsn_code: '', gst_rate: 18, weight: 0, price: 0, quantity: 0 }); }}
+                      className="bg-primary text-white p-2 rounded-lg hover:bg-primary-fixed transition-colors shadow-md">
+                      <span className="material-symbols-outlined text-[20px]">add</span>
+                    </button>
+                  </div>
                 )}
               </div>
               <div className="relative">
@@ -144,8 +168,8 @@ const InventoryPage = () => {
             </div>
           </div>
 
-          {/* Detail / Form Panel */}
-          <div className="w-2/3 bg-background flex flex-col h-full overflow-y-auto">
+          {/* Right Panel: Detail / Form */}
+          <div className="w-full lg:flex-1 h-[55vh] lg:h-full bg-white overflow-y-auto p-4 md:p-8 relative">
             {showForm ? (
               <form onSubmit={handleSave} className="p-8 max-w-2xl space-y-6">
                 <div className="flex items-center gap-3 border-b border-slate-100 pb-4">

@@ -46,10 +46,14 @@ export default function HistoryPage() {
       });
   };
 
+  const currentRole = localStorage.getItem('role') || '';
+
   const tabConfig = [
     { key: 'SALE' as Tab, label: 'Sales', icon: 'point_of_sale', color: 'text-blue-600 bg-blue-50 border-blue-200' },
     { key: 'PURCHASE' as Tab, label: 'Purchases', icon: 'shopping_cart', color: 'text-orange-600 bg-orange-50 border-orange-200' },
-    { key: 'MANUFACTURING' as Tab, label: 'Manufacturing', icon: 'factory', color: 'text-green-600 bg-green-50 border-green-200' },
+    ...(['SYSTEM_ADMIN', 'PRODUCTION_TECHNICIAN'].includes(currentRole)
+      ? [{ key: 'MANUFACTURING' as Tab, label: 'Manufacturing', icon: 'factory', color: 'text-green-600 bg-green-50 border-green-200' }]
+      : []),
   ];
 
   const statusColor = (s: string) => {
@@ -73,7 +77,7 @@ export default function HistoryPage() {
       <SideNavBar />
       <div className="flex-1 ml-64 flex flex-col h-screen overflow-hidden">
         <TopNavBar />
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 bg-[#f8f9fa]">
+        <main className="flex-1 overflow-y-auto pt-24 p-4 md:p-8 bg-[#f8f9fa]">
           <div className="mb-6 flex justify-between items-end">
             <div>
               <h2 className="text-2xl font-black text-primary">Order History & Reports</h2>
